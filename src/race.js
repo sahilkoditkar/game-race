@@ -1,0 +1,359 @@
+import * as THREE from 'three';
+import { Track } from './track.js';
+import { buildScenery } from './scenery.js';
+import { Car } from './car.js';
+import { driveAI } from './ai.js';
+import { HUD } from './hud.js';
+
+const clamp = THREE.MathUtils.clamp;
+
+export class Race {
+  /**
+   * @param {object} o
+   * @param {THREE.WebGLRenderer} o.renderer
+   * @param {object} o.config  { track, laps, players:[], ai:[], mode, quality }
+   * @param {Input} o.input
+   * @param {AudioSystem} o.audio
+   * @param {function} o.onFinish(results)
+   */
+  constructor(o) {
+    this.renderer = o.renderer;
+    this.config = o.config;
+    this.input = o.input;
+    this.audio = o.audio;
+    this.onFinish = o.onFinish;
+    this.quality = o.config.quality || 'high';
+
+    this.scene = new THREE.Scene();
+    this.track = new Track(o.config.track, this.quality);
+    this.theme = this.track.theme;
+    this.scene.background = new THREE.Color(this.theme.sky);
+    this.scene.fog = new THREE.Fog(this.theme.fog, this.theme.night ? 60 : 180, this.theme.night ? 520 : 1400);
+    this.scene.add(this.track.group);
+    this.scene.add(buildScenery(this.track, this.quality));
+    this._lights();
+
+    this.cars = [];
+    this.players = [];
+    this.time = 0;
+    this.state = 'countdown';
+    this.countdown = 3.9;
+    this.lastCount = -1;
+    this.finishDelay = 0;
+    this.paused = false;
+    this.elapsed = 0;
+
+    this.tmp = new THREE.Vector3();
+    this.tmp2 = new THREE.Vector3();
+    this._setupCars();
+    this.hud = new HUD(this.players.length, this.track, this.cars, this.config);
+    this._setupCameras();
+    this._setupAudio();
+    this.track.setStartLights(0, false);
+  }
+
+  _lights() {
+    const th = this.theme;
+    const hemi = new THREE.HemisphereLight(th.sky, th.ground, th.ambient * 2.4);
+    this.scene.add(hemi);
+    const sun = new THREE.DirectionalLight(th.night ? 0x9fb0ff : 0xfff4e0, th.sun * 3.0);
+    sun.position.set(120, 180, 80);
+    sun.castShadow = this.quality !== 'low';
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 10; sun.shadow.camera.far = 600;
+    sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
+    sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
+    sun.shadow.bias = -0.0008;
+    sun.shadow.camera.updateProjectionMatrix();
+    this.sun = sun;
+    this.scene.add(sun);
+    this.scene.add(sun.target);
+  }
+
+  _setupCars() {
+    const cfg = this.config;
+    const grid = [];
+    cfg.ai.forEach((a, i) => {
+      const car = new Car({ name: a.name, color: a.color, stats: a.stats, shape: a.shape, isPlayer: false, aiSkill: a.skill });
+      car.laneBase = ((i % 3) - 1) * this.track.halfWidth * 0.35;
+      grid.push(car);
+    });
+    cfg.players.forEach((p, i) => {
+      const car = new Car({ name: p.name, color: p.color, stats: p.stats, shape: p.shape, isPlayer: true, playerIndex: i });
+      car.scheme = p.scheme; car.pad = p.pad ?? -1;
+      this.players.push(car);
+      grid.push(car);
+    });
+    // Players start at the back of the grid.
+    grid.forEach((car, slot) => {
+      const g = this.track.gridSlot(slot);
+      car.place(g.x, g.z, g.heading);
+      car.trackIdx = g.idx;
+      car.lap = 0; car.nextSector = this.track.sectorCount; // waiting to cross the line
+      car.progress = -(this.track.count - g.idx);
+      this.scene.add(car.mesh);
+      this.cars.push(car);
+    });
+    // headlights for players at night
+    if (this.theme.night) {
+      for (const car of this.players) {
+        for (const sx of [-0.6, 0.6]) {
+          const spot = new THREE.SpotLight(0xfff6d5, 60, 70, 0.45, 0.5, 1.2);
+          spot.position.set(sx, 0.7, 2);
+          spot.target.position.set(sx, 0.2, 30);
+          car.mesh.add(spot); car.mesh.add(spot.target);
+        }
+      }
+    }
+  }
+
+  _setupCameras() {
+    this.cameras = this.players.map(() => {
+      const cam = new THREE.PerspectiveCamera(70, 1, 0.5, 2500);
+      cam.userData.shake = 0;
+      return cam;
+    });
+    this.cameras.forEach((cam, i) => this._snapCamera(cam, this.players[i]));
+    this.resize();
+  }
+
+  _setupAudio() {
+    this.audio.init();
+    this.engineVoices = this.players.map(() => this.audio.createEngine());
+  }
+
+  resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const n = this.players.length;
+    this.vertical = n === 2 && w / h >= 1.35;
+    this.viewports = [];
+    if (n === 1) this.viewports.push({ x: 0, y: 0, w, h });
+    else if (this.vertical) { this.viewports.push({ x: 0, y: 0, w: w / 2, h }, { x: w / 2, y: 0, w: w / 2, h }); }
+    else { this.viewports.push({ x: 0, y: h / 2, w, h: h / 2 }, { x: 0, y: 0, w, h: h / 2 }); }
+    this.viewports.forEach((v, i) => { this.cameras[i].aspect = v.w / v.h; this.cameras[i].updateProjectionMatrix(); });
+    this.hud.layout(n, this.vertical);
+  }
+
+  _snapCamera(cam, car) {
+    cam.userData.heading = car.heading;
+    this._updateCamera(cam, car, 1);
+  }
+
+  _updateCamera(cam, car, dt) {
+    // Position is rigidly attached to the car (no positional lag); only the
+    // camera's heading eases toward the car's heading so turns feel smooth.
+    let d = car.heading - cam.userData.heading;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    cam.userData.heading += d * Math.min(1, dt * 6);
+    const h = cam.userData.heading;
+    const speedF = clamp(car.speed / 60, 0, 1);
+    const dist = 7.5 + speedF * 2.5;
+    const height = 3.0 + speedF * 0.7;
+    const fx = Math.sin(h), fz = Math.cos(h);
+    cam.position.set(car.pos.x - fx * dist, height, car.pos.z - fz * dist);
+    if (cam.userData.shake > 0.01) {
+      cam.position.x += (Math.random() - 0.5) * cam.userData.shake;
+      cam.position.y += (Math.random() - 0.5) * cam.userData.shake * 0.6;
+      cam.userData.shake *= Math.exp(-dt * 7);
+    }
+    const f = car.forward;
+    const look = this.tmp2.copy(car.pos).addScaledVector(f, 6).add(this.tmp.set(0, 0.9, 0));
+    cam.lookAt(look);
+    const fov = 66 + speedF * 14;
+    if (Math.abs(cam.fov - fov) > 0.1) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 4); cam.updateProjectionMatrix(); }
+  }
+
+  /** Move a player car back onto the track facing the right way. */
+  resetCar(car) {
+    const s = this.track.samples[car.trackIdx];
+    car.place(s.p.x, s.p.z, s.heading);
+    car.wrongWay = false;
+  }
+
+  update(dt) {
+    if (this.paused) return;
+    dt = Math.min(dt, 1 / 20);
+    this.elapsed += dt;
+
+    // Countdown
+    if (this.state === 'countdown') {
+      this.countdown -= dt;
+      const n = Math.ceil(this.countdown);
+      if (n !== this.lastCount) {
+        this.lastCount = n;
+        if (n >= 1 && n <= 3) { this.hud.showCountdown(String(n)); this.audio.countdown(n); this.track.setStartLights(4 - n, false); }
+        if (n <= 0) { this.hud.showCountdown('GO!', true); this.audio.countdown(0); this.track.setStartLights(0, true); this.state = 'racing'; this.time = 0; for (const c of this.cars) c.lapStart = 0; }
+      }
+    } else {
+      this.time += dt;
+    }
+    const live = this.state !== 'countdown';
+
+    // Inputs
+    this.players.forEach((car, i) => {
+      const r = this.input.read(car.scheme, car.pad);
+      if (car.finished) { car.input.throttle = 0; car.input.brake = 0.4; car.input.steer = 0; car.input.handbrake = false; }
+      else { car.input.throttle = r.throttle; car.input.brake = r.brake; car.input.steer = r.steer; car.input.handbrake = r.handbrake; }
+      if (r.reset && live) this.resetCar(car);
+    });
+    let bestPlayerProgress = null;
+    for (const p of this.players) if (bestPlayerProgress === null || p.progress > bestPlayerProgress) bestPlayerProgress = p.progress;
+    const ctx = { track: this.track, cars: this.cars, live, bestPlayerProgress, time: this.time };
+    for (const car of this.cars) if (!car.isPlayer) driveAI(car, ctx, dt);
+
+    // Physics (sub-step for stability at high speed)
+    const steps = 2, sdt = dt / steps;
+    for (let s = 0; s < steps; s++) {
+      for (const car of this.cars) car.update(sdt, { track: this.track, live });
+      this._collideCars();
+    }
+
+    // Laps / progress / ranking
+    for (const car of this.cars) this._lapLogic(car);
+    this._rank();
+
+    // Cameras, audio, fx
+    this.players.forEach((car, i) => {
+      const cam = this.cameras[i];
+      if (car.wallHit > 4) { cam.userData.shake = Math.min(0.6, car.wallHit * 0.05); this.audio.impact(car.wallHit); }
+      if (car.carHit > 3) { cam.userData.shake = Math.max(cam.userData.shake, 0.25); this.audio.impact(car.carHit * 0.6); car.carHit = 0; }
+      this._updateCamera(cam, car, dt);
+      const v = this.engineVoices[i];
+      if (v) this.audio.updateEngine(v, clamp(car.speed / car.stats.maxSpeed, 0, 1), car.input.throttle, car.drifting || (car.input.handbrake && car.speed > 5), this.players.length > 1 ? 0.7 : 1);
+    });
+
+    // Shadow camera follows the players
+    const focus = this.players.length === 1 ? this.players[0].pos : this.players[0].pos.clone().add(this.players[1].pos).multiplyScalar(0.5);
+    this.sun.position.set(focus.x + 120, 180, focus.z + 80);
+    this.sun.target.position.copy(focus);
+    if (this.players.length > 1) {
+      const d = this.players[0].pos.distanceTo(this.players[1].pos);
+      const sz = clamp(60 + d * 0.6, 90, 260);
+      if (Math.abs(this.sun.shadow.camera.right - sz) > 5) {
+        this.sun.shadow.camera.left = -sz; this.sun.shadow.camera.right = sz; this.sun.shadow.camera.top = sz; this.sun.shadow.camera.bottom = -sz;
+        this.sun.shadow.camera.updateProjectionMatrix();
+      }
+    }
+
+    this.hud.update(this, dt);
+
+    // Finish handling
+    if (this.state === 'racing' && this.players.every(p => p.finished)) {
+      this.state = 'finishing';
+      this.finishDelay = 2.5;
+      this.audio.finish();
+    }
+    if (this.state === 'finishing') {
+      this.finishDelay -= dt;
+      if (this.finishDelay <= 0) { this.state = 'finished'; this.onFinish(this.results()); }
+    }
+  }
+
+  _collideCars() {
+    const cars = this.cars, R = 2.1;
+    for (let i = 0; i < cars.length; i++) {
+      const a = cars[i];
+      for (let j = i + 1; j < cars.length; j++) {
+        const b = cars[j];
+        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > R * R || d2 === 0) continue;
+        const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
+        const pen = R - d;
+        a.pos.x -= nx * pen * 0.5; a.pos.z -= nz * pen * 0.5;
+        b.pos.x += nx * pen * 0.5; b.pos.z += nz * pen * 0.5;
+        const rvx = b.vel.x - a.vel.x, rvz = b.vel.z - a.vel.z;
+        const vn = rvx * nx + rvz * nz;
+        if (vn < 0) {
+          const jImp = -(1 + 0.35) * vn * 0.5;
+          a.vel.x -= nx * jImp; a.vel.z -= nz * jImp;
+          b.vel.x += nx * jImp; b.vel.z += nz * jImp;
+          for (const c of [a, b]) {
+            const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+            c.vf = c.vel.x * fx + c.vel.z * fz;
+            c.vr = c.vel.x * (-fz) + c.vel.z * fx;
+            c.carHit = Math.max(c.carHit, Math.abs(vn));
+          }
+        }
+      }
+    }
+  }
+
+  _lapLogic(car) {
+    const tr = this.track;
+    const sector = tr.sectorOf(car.trackIdx);
+    const C = tr.sectorCount;
+    if (car.nextSector < C && sector === car.nextSector) car.nextSector++;
+    else if (car.nextSector === C && sector === 0 && !car.finished) {
+      // crossed the start/finish line in the right direction
+      if (car.lap >= 1) {
+        const t = this.time - car.lapStart;
+        car.lapTimes.push(t);
+        if (t < car.bestLap) car.bestLap = t;
+        if (car.isPlayer) { this.audio.lap(); this.hud.flash(car.playerIndex, `LAP ${car.lap} · ${fmtTime(t)}`, t === car.bestLap ? 'BEST LAP' : ''); }
+      }
+      car.lap++;
+      car.lapStart = this.time;
+      car.nextSector = 1;
+      if (car.lap > this.config.laps) {
+        car.finished = true;
+        car.finishTime = this.time;
+        if (car.isPlayer) this.hud.flash(car.playerIndex, 'FINISH!', `P${car.rank}`);
+      }
+      if (car.isPlayer && car.lap === this.config.laps && !car.finished) this.hud.flash(car.playerIndex, 'FINAL LAP', '');
+    }
+    car.progress = (car.lap - 1) * tr.count + tr.progressAt(car.pos, car.trackIdx);
+  }
+
+  _rank() {
+    const sorted = [...this.cars].sort((a, b) => {
+      if (a.finished && b.finished) return a.finishTime - b.finishTime;
+      if (a.finished) return -1;
+      if (b.finished) return 1;
+      return b.progress - a.progress;
+    });
+    sorted.forEach((c, i) => c.rank = i + 1);
+    this.ranking = sorted;
+  }
+
+  results() {
+    this._rank();
+    return this.ranking.map(c => ({
+      name: c.name, isPlayer: c.isPlayer, playerIndex: c.playerIndex, color: c.color, rank: c.rank,
+      finished: c.finished, time: c.finished ? c.finishTime : null, bestLap: isFinite(c.bestLap) ? c.bestLap : null,
+      laps: c.finished ? this.config.laps : Math.max(0, c.lap - 1),
+    }));
+  }
+
+  render() {
+    const r = this.renderer;
+    const H = window.innerHeight;
+    r.setScissorTest(true);
+    this.viewports.forEach((v, i) => {
+      r.setViewport(v.x, v.y, v.w, v.h);
+      r.setScissor(v.x, v.y, v.w, v.h);
+      // hide the driver's own car body? no – third person, keep it.
+      r.render(this.scene, this.cameras[i]);
+    });
+    r.setScissorTest(false);
+    void H;
+  }
+
+  setPaused(p) { this.paused = p; if (p) this.audio.stopEngines(); else this._setupAudio(); }
+
+  dispose() {
+    this.audio.stopEngines();
+    this.hud.dispose();
+    this.scene.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } }
+    });
+  }
+}
+
+export function fmtTime(t) {
+  if (t === null || t === undefined || !isFinite(t)) return '--:--.---';
+  const m = Math.floor(t / 60), s = Math.floor(t % 60), ms = Math.floor((t * 1000) % 1000);
+  return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+}
