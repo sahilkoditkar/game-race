@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Track } from './track.js';
 import { buildScenery } from './scenery.js';
-import { Car } from './car.js';
+import { Car, makeGhost } from './car.js';
 import { driveAI } from './ai.js';
 import { HUD } from './hud.js';
 
@@ -32,6 +32,7 @@ export class Race {
     this.scene.add(this.track.group);
     this.scene.add(buildScenery(this.track, this.quality));
     this._lights();
+    this._environment();
 
     this.cars = [];
     this.players = [];
@@ -49,7 +50,9 @@ export class Race {
     this.hud = new HUD(this.players.length, this.track, this.cars, this.config);
     this._setupCameras();
     this._setupAudio();
+    this.input.setTouchVisible(this.players.length === 1);
     this.track.setStartLights(0, false);
+    this._setupGhost();
   }
 
   _lights() {
@@ -68,6 +71,67 @@ export class Race {
     this.sun = sun;
     this.scene.add(sun);
     this.scene.add(sun.target);
+  }
+
+  /** Cheap procedural environment map so paint and glass have reflections. */
+  _environment() {
+    const th = this.theme;
+    const env = new THREE.Scene();
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: { top: { value: new THREE.Color(th.sky) }, bottom: { value: new THREE.Color(th.ground) }, horizon: { value: new THREE.Color(th.fog) } },
+      vertexShader: 'varying vec3 vW; void main(){ vW = (modelMatrix * vec4(position,1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: 'uniform vec3 top; uniform vec3 bottom; uniform vec3 horizon; varying vec3 vW; void main(){ float h = normalize(vW).y; vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.6)) : mix(horizon, bottom, pow(-h, 0.5)); gl_FragColor = vec4(c, 1.0); }',
+    });
+    env.add(new THREE.Mesh(new THREE.SphereGeometry(50, 16, 8), skyMat));
+    const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(4, 8, 8), new THREE.MeshBasicMaterial({ color: th.night ? 0x334466 : 0xffffff }));
+    sunDisc.position.set(20, 30, 14);
+    env.add(sunDisc);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envTex = pmrem.fromScene(env, 0.04).texture;
+    pmrem.dispose();
+    this.scene.environment = this.envTex;
+    this.scene.environmentIntensity = th.night ? 0.5 : 0.9;
+  }
+
+  _setupGhost() {
+    this.ghost = null;
+    this.ghostData = this.config.ghost || null; // { samples: [[x,z,heading],...], step, lapTime }
+    this.recording = null;
+    this.bestRecording = null;
+    if (this.config.mode !== 'timetrial') return;
+    const p = this.players[0];
+    const ghostMesh = makeGhost(p.shape, 0x9ad6ff);
+    ghostMesh.visible = false;
+    this.scene.add(ghostMesh);
+    this.ghost = ghostMesh;
+  }
+
+  _updateGhost(dt) {
+    if (!this.ghost) return;
+    const p = this.players[0];
+    if (this.state === 'countdown' || p.lap < 1 || p.finished) { this.ghost.visible = false; return; }
+    const t = this.time - p.lapStart;
+    // record current lap at 20 Hz
+    if (this.recording) {
+      const need = Math.floor(t / this.recording.step);
+      while (this.recording.samples.length <= need) this.recording.samples.push([+p.pos.x.toFixed(2), +p.pos.z.toFixed(2), +p.heading.toFixed(3)]);
+    }
+    const g = this.ghostData;
+    if (!g || !g.samples.length) { this.ghost.visible = false; return; }
+    const f = t / g.step;
+    const i = Math.min(g.samples.length - 1, Math.floor(f));
+    const j = Math.min(g.samples.length - 1, i + 1);
+    const k = f - i;
+    const a = g.samples[i], b = g.samples[j];
+    this.ghost.visible = t < g.lapTime + 0.5;
+    this.ghost.position.set(a[0] + (b[0] - a[0]) * k, 0.12, a[1] + (b[1] - a[1]) * k);
+    let dh = b[2] - a[2];
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    this.ghost.rotation.y = a[2] + dh * k;
+    const wheels = this.ghost.userData.wheels;
+    for (const w of wheels) w.rotation.x += dt * 30;
   }
 
   _setupCars() {
@@ -192,15 +256,15 @@ export class Race {
 
     // Inputs
     this.players.forEach((car, i) => {
-      const r = this.input.read(car.scheme, car.pad);
-      if (car.finished) { car.input.throttle = 0; car.input.brake = 0.4; car.input.steer = 0; car.input.handbrake = false; }
+      const r = this.input.read(car.scheme, car.pad, i);
+      if (car.finished) { car.autopilot = true; car.aiSkill = 0.7; }
       else { car.input.throttle = r.throttle; car.input.brake = r.brake; car.input.steer = r.steer; car.input.handbrake = r.handbrake; }
-      if (r.reset && live) this.resetCar(car);
+      if (r.reset && live && !car.finished) this.resetCar(car);
     });
     let bestPlayerProgress = null;
     for (const p of this.players) if (bestPlayerProgress === null || p.progress > bestPlayerProgress) bestPlayerProgress = p.progress;
     const ctx = { track: this.track, cars: this.cars, live, bestPlayerProgress, time: this.time };
-    for (const car of this.cars) if (!car.isPlayer) driveAI(car, ctx, dt);
+    for (const car of this.cars) if (!car.isPlayer || car.autopilot) driveAI(car, ctx, dt);
 
     // Physics (sub-step for stability at high speed)
     const steps = 2, sdt = dt / steps;
@@ -220,7 +284,7 @@ export class Race {
       if (car.carHit > 3) { cam.userData.shake = Math.max(cam.userData.shake, 0.25); this.audio.impact(car.carHit * 0.6); car.carHit = 0; }
       this._updateCamera(cam, car, dt);
       const v = this.engineVoices[i];
-      if (v) this.audio.updateEngine(v, clamp(car.speed / car.stats.maxSpeed, 0, 1), car.input.throttle, car.drifting || (car.input.handbrake && car.speed > 5), this.players.length > 1 ? 0.7 : 1);
+      if (v) this.audio.updateEngine(v, clamp(car.speed / car.stats.maxSpeed, 0, 1), car.input.throttle, car.drifting || (car.input.handbrake && car.speed > 5), (this.players.length > 1 ? 0.7 : 1) * (car.finished ? 0.25 : 1));
     });
 
     // Shadow camera follows the players
@@ -236,6 +300,7 @@ export class Race {
       }
     }
 
+    this._updateGhost(dt);
     this.hud.update(this, dt);
 
     // Finish handling
@@ -290,12 +355,27 @@ export class Race {
       if (car.lap >= 1) {
         const t = this.time - car.lapStart;
         car.lapTimes.push(t);
-        if (t < car.bestLap) car.bestLap = t;
-        if (car.isPlayer) { this.audio.lap(); this.hud.flash(car.playerIndex, `LAP ${car.lap} · ${fmtTime(t)}`, t === car.bestLap ? 'BEST LAP' : ''); }
+        const wasBest = t < car.bestLap;
+        if (wasBest) car.bestLap = t;
+        if (car.isPlayer) {
+          this.audio.lap();
+          let sub = wasBest ? 'BEST LAP' : '';
+          if (this.ghost && car.playerIndex === 0) {
+            const ref = this.ghostData ? this.ghostData.lapTime : null;
+            if (ref) { const d = t - ref; sub = `${d <= 0 ? '' : '+'}${d.toFixed(3)} vs ghost`; }
+            if (this.recording && (!this.bestRecording || t < this.bestRecording.lapTime)) {
+              this.recording.lapTime = t;
+              this.bestRecording = this.recording;
+            }
+          }
+          this.hud.flash(car.playerIndex, `LAP ${car.lap} · ${fmtTime(t)}`, sub);
+        }
       }
       car.lap++;
       car.lapStart = this.time;
       car.nextSector = 1;
+      if (this.ghost && car.playerIndex === 0 && !car.finished) this.recording = { step: 0.05, samples: [], lapTime: null };
+      if (this.ghost && car.playerIndex === 0 && car.lap > this.config.laps) this.recording = null;
       if (car.lap > this.config.laps) {
         car.finished = true;
         car.finishTime = this.time;
@@ -315,6 +395,13 @@ export class Race {
     });
     sorted.forEach((c, i) => c.rank = i + 1);
     this.ranking = sorted;
+  }
+
+  /** Best recorded lap of this session (time trial), or null. */
+  ghostCandidate() {
+    const r = this.bestRecording;
+    if (!r || !r.lapTime || r.samples.length < 10) return null;
+    return { step: r.step, samples: r.samples, lapTime: r.lapTime };
   }
 
   results() {
@@ -345,6 +432,8 @@ export class Race {
   dispose() {
     this.audio.stopEngines();
     this.hud.dispose();
+    if (this.envTex) this.envTex.dispose();
+    this.input.setTouchVisible(false);
     this.scene.traverse(o => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } }

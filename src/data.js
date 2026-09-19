@@ -4,25 +4,25 @@ export const CARS = [
   {
     id: 'hatch', name: 'Vento Hatch', price: 0,
     desc: 'Nimble front-wheel-drive hatch. Forgiving and cheap to upgrade.',
-    stats: { maxSpeed: 54, accel: 15, grip: 6.8, turn: 1.0, brake: 34 },
+    stats: { maxSpeed: 58, accel: 16, grip: 6.8, turn: 1.0, brake: 36 },
     shape: 'hatch',
   },
   {
     id: 'gt', name: 'Strada GT', price: 14000,
     desc: 'Rear-drive grand tourer. Big power, needs a steady hand.',
-    stats: { maxSpeed: 64, accel: 19, grip: 7.6, turn: 1.04, brake: 38 },
+    stats: { maxSpeed: 70, accel: 20, grip: 7.6, turn: 1.04, brake: 40 },
     shape: 'gt',
   },
   {
     id: 'proto', name: 'Nightfall LMP', price: 32000,
     desc: 'Endurance prototype with massive downforce and a giant rear wing.',
-    stats: { maxSpeed: 72, accel: 22, grip: 8.8, turn: 1.1, brake: 44 },
+    stats: { maxSpeed: 78, accel: 23, grip: 8.8, turn: 1.1, brake: 46 },
     shape: 'proto',
   },
   {
     id: 'formula', name: 'Apex F1', price: 60000,
     desc: 'Open-wheel single seater. The fastest thing on four wheels.',
-    stats: { maxSpeed: 82, accel: 26, grip: 9.8, turn: 1.18, brake: 50 },
+    stats: { maxSpeed: 90, accel: 27, grip: 9.8, turn: 1.18, brake: 52 },
     shape: 'formula',
   },
 ];
@@ -99,23 +99,25 @@ export const SERIES = [
     bonus: 15000,
     events: [
       { track: 'desert', laps: 3 },
-      { track: 'sunrise', laps: 3 },
+      { track: 'monza', laps: 2 },
       { track: 'neon', laps: 3 },
+      { track: 'interlagos', laps: 2 },
       { track: 'coastal', laps: 3 },
     ],
   },
   {
     id: 'gp', name: 'Grand Prix Championship', tier: 3,
-    desc: 'The world championship. Nine elite drivers, five circuits, no mercy.',
+    desc: 'The world championship. Nine elite drivers, six circuits, no mercy.',
     aiCount: 9, aiSkill: 1.0, requires: 'pro', requireRank: 2,
     prize: [14000, 10000, 7500, 5500, 4000, 3000, 2200, 1500, 1000, 600],
     bonus: 40000,
     events: [
-      { track: 'sunrise', laps: 4 },
+      { track: 'silverstone', laps: 3 },
       { track: 'alpine', laps: 4 },
-      { track: 'desert', laps: 4 },
+      { track: 'monza', laps: 3 },
+      { track: 'spa', laps: 3 },
+      { track: 'interlagos', laps: 3 },
       { track: 'neon', laps: 4 },
-      { track: 'coastal', laps: 5 },
     ],
   },
   {
@@ -125,9 +127,10 @@ export const SERIES = [
     prize: [30000, 20000, 14000, 10000, 8000, 6000, 4500, 3500, 2500, 2000, 1500, 1000],
     bonus: 100000,
     events: [
+      { track: 'spa', laps: 5 },
+      { track: 'silverstone', laps: 5 },
+      { track: 'monza', laps: 6 },
       { track: 'neon', laps: 6 },
-      { track: 'desert', laps: 6 },
-      { track: 'alpine', laps: 7 },
     ],
   },
 ];

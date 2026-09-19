@@ -10,6 +10,19 @@ import {
   applyCareerResult, restartSeries, buyCar, buyUpgrade, recordBestLap,
 } from './career.js';
 
+const GHOST_PREFIX = 'apexrush.ghost.';
+function loadGhost(key) {
+  try { const raw = localStorage.getItem(GHOST_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+}
+function saveGhost(key, data) {
+  try {
+    const json = JSON.stringify(data);
+    if (json.length > 600000) return false; // keep well inside localStorage limits
+    localStorage.setItem(GHOST_PREFIX + key, json);
+    return true;
+  } catch (e) { return false; }
+}
+
 class App {
   constructor() {
     this.canvas = document.getElementById('game');
@@ -47,31 +60,43 @@ class App {
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
-  // A slowly rotating showcase car behind the menus.
+  // A showroom with the player's current car, shown behind the menus.
   _buildIdleScene() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0d12);
-    scene.fog = new THREE.Fog(0x0b0d12, 20, 60);
-    scene.add(new THREE.HemisphereLight(0x8ab4ff, 0x1a1c24, 2.0));
-    const key = new THREE.DirectionalLight(0xffffff, 4.0); key.position.set(5, 8, 6); key.castShadow = true; scene.add(key);
-    const rim = new THREE.DirectionalLight(0xff5a1f, 3.0); rim.position.set(-6, 3, -6); scene.add(rim);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.6, metalness: 0.3 }));
+    scene.fog = new THREE.Fog(0x0b0d12, 18, 45);
+    scene.add(new THREE.HemisphereLight(0x8ab4ff, 0x1a1c24, 1.6));
+    const key = new THREE.SpotLight(0xffffff, 260, 40, 0.42, 0.6, 1.6); key.position.set(2, 11, 4); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); scene.add(key); scene.add(key.target);
+    const rim = new THREE.DirectionalLight(0xff5a1f, 2.5); rim.position.set(-6, 3, -6); scene.add(rim);
+    const fill = new THREE.DirectionalLight(0x4a7dff, 1.2); fill.position.set(6, 2, -4); scene.add(fill);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.35, metalness: 0.5 }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-    this.idle = { scene, camera: new THREE.PerspectiveCamera(45, 1, 0.1, 100), cars: [], t: 0 };
-    this.idle.camera.position.set(0, 3, 10);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.8, 0.12, 48), new THREE.MeshStandardMaterial({ color: 0x1f2230, roughness: 0.3, metalness: 0.6 }));
+    disc.position.y = 0.06; disc.receiveShadow = true; scene.add(disc);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(3.7, 0.04, 8, 64), new THREE.MeshStandardMaterial({ color: 0xff5a1f, emissive: 0xff5a1f, emissiveIntensity: 2 }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.13; scene.add(ring);
+    // simple reflections for the paint
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const envScene = new THREE.Scene();
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(30, 12, 8), new THREE.MeshBasicMaterial({ color: 0x2a3140, side: THREE.BackSide })));
+    for (const [x, y, z] of [[10, 12, 6], [-8, 10, -6], [0, 14, -10]]) { const l = new THREE.Mesh(new THREE.BoxGeometry(6, 1, 12), new THREE.MeshBasicMaterial({ color: 0xffffff })); l.position.set(x, y, z); l.lookAt(0, 0, 0); envScene.add(l); }
+    scene.environment = pm.fromScene(envScene, 0.04).texture;
+    pm.dispose();
+    this.idle = { scene, camera: new THREE.PerspectiveCamera(40, 1, 0.1, 100), cars: [], t: 0, pivot: new THREE.Group() };
+    scene.add(this.idle.pivot);
+    this.idle.pivot.position.set(0, 0.12, 0);
     this._refreshIdleCars();
     this.onResize();
   }
 
   _refreshIdleCars() {
     if (!this.idle) return;
-    for (const c of this.idle.cars) this.idle.scene.remove(c);
+    for (const c of this.idle.cars) this.idle.pivot.remove(c);
     this.idle.cars = [];
     import('./car.js').then(({ buildCarMesh }) => {
       const car = getCar(this.profile.selected);
       const m = buildCarMesh(car.shape, PLAYER_COLORS[this.profile.colorIndex || 0]);
-      m.position.x = 4.2;
-      this.idle.scene.add(m);
+      this.idle.pivot.add(m);
       this.idle.cars.push(m);
     });
   }
@@ -86,15 +111,17 @@ class App {
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (this.race) {
-      const pauseKey = this.input.justPressed('Escape') || this.input.read('none', 0).pause || this.input.read('none', 1).pause;
+      const pauseKey = this.input.justPressed('Escape') || this.input.read('none', 0, 0).pause || this.input.read('none', 1, 1).pause;
       if (pauseKey && this.race.state !== 'finished') this.togglePause();
       if (!this.paused) this.race.update(dt);
       this.race.render();
     } else if (this.idle) {
       this.idle.t += dt;
-      for (const c of this.idle.cars) c.rotation.y = this.idle.t * 0.5;
-      this.idle.camera.position.set(Math.sin(this.idle.t * 0.2) * 1.5, 2.4, 9);
-      this.idle.camera.lookAt(1.5, 0.6, 0);
+      this.idle.pivot.rotation.y = this.idle.t * 0.35;
+      // keep the car on the right-hand side, clear of the centred menu panel
+      const wide = window.innerWidth > 900;
+      this.idle.camera.position.set(wide ? 5 : 0, 2.6 + Math.sin(this.idle.t * 0.3) * 0.2, 13);
+      this.idle.camera.lookAt(wide ? -6 : 0, 0.5, 0);
       this.renderer.render(this.idle.scene, this.idle.camera);
     }
     this.input.endFrame();
@@ -115,7 +142,8 @@ class App {
     });
     const difficulty = [0.15, 0.45, 0.75, 1.0][st.difficulty] ?? 0.5;
     const ai = mode === 'timetrial' ? [] : quickField(st.aiCount, difficulty, st.players[0].carId);
-    this.startRace({ track, laps: st.laps, players, ai, mode, quality: this.profile.settings.quality }, { mode, trackName: track.name, laps: st.laps, trackId: track.id, carId: st.players[0].carId });
+    const ghost = mode === 'timetrial' ? loadGhost(`${track.id}:${st.players[0].carId}`) : null;
+    this.startRace({ track, laps: st.laps, players, ai, mode, ghost, quality: this.profile.settings.quality }, { mode, trackName: track.name, laps: st.laps, trackId: track.id, carId: st.players[0].carId, hasGhost: !!ghost });
   }
 
   startCareerRace(seriesId) {
@@ -145,6 +173,12 @@ class App {
     const ctx = { ...this.raceCtx };
     const me = results.find(r => r.isPlayer && r.playerIndex === 0);
     if (me && me.bestLap && ctx.carId && recordBestLap(this.profile, ctx.trackId, ctx.carId, me.bestLap)) ctx.newBest = me.bestLap;
+    if (ctx.mode === 'timetrial' && this.race) {
+      const g = this.race.ghostCandidate();
+      const key = `${ctx.trackId}:${ctx.carId}`;
+      const prev = loadGhost(key);
+      if (g && (!prev || g.lapTime < prev.lapTime)) { saveGhost(key, g); ctx.ghostSaved = true; }
+    }
     if (ctx.mode === 'career') {
       ctx.career = applyCareerResult(this.profile, ctx.seriesId, results);
       this._refreshIdleCars();
@@ -156,6 +190,7 @@ class App {
   restartRace() {
     if (!this.lastRaceConfig) return this.ui.mainMenu();
     const { config, ctx } = this.lastRaceConfig;
+    if (ctx.mode === 'timetrial') { config.ghost = loadGhost(`${ctx.trackId}:${ctx.carId}`); ctx.hasGhost = !!config.ghost; }
     if (ctx.mode === 'career') {
       // Career events can't be replayed once scored; only allow restart mid-race.
       if (this.race && this.race.state !== 'finished') { this.startRace(config, ctx); return; }
@@ -168,6 +203,13 @@ class App {
     this.disposeRace();
     this.paused = false;
     this.ui.mainMenu();
+  }
+
+  /** Leave a finished race and show a menu screen ('menu' | 'career'). */
+  leaveRace(where = 'menu') {
+    this.disposeRace();
+    this.paused = false;
+    if (where === 'career') this.ui.career(); else this.ui.mainMenu();
   }
 
   disposeRace() {

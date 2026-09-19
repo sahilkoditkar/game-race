@@ -81,7 +81,7 @@ export class UI {
           <div class="grid-3">
             ${TRACKS.map(t => `<div class="card ${t.id === st.trackId ? 'selected' : ''}" data-track="${t.id}" style="cursor:pointer">
               <h4>${t.name}</h4><div class="meta">${t.desc}</div>
-              <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}</div></div>`).join('')}
+              <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}${t.real ? ' · <span class="badge">real circuit</span>' : ''}</div></div>`).join('')}
           </div>
           <div class="grid-2" style="margin-top:16px">
             <div class="field"><label>Laps: <b id="lapsv">${st.laps}</b></label><input type="range" min="1" max="10" value="${st.laps}" data-field="laps"></div>
@@ -89,7 +89,7 @@ export class UI {
             <div class="field"><label>AI opponents: <b id="aiv">${st.aiCount}</b></label><input type="range" min="0" max="11" value="${st.aiCount}" data-field="aiCount"></div>
             <div class="field"><label>AI difficulty</label><div class="chips">
               ${['Easy', 'Medium', 'Hard', 'Insane'].map((d, i) => `<div class="chip ${st.difficulty === i ? 'active' : ''}" data-diff="${i}">${d}</div>`).join('')}
-            </div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div></div>`}
+            </div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div><div class="meta" style="margin-top:6px">Your best lap is replayed as a ghost car. Beat it to record a new one.</div></div>`}
           </div>
           <div class="grid-2">
             ${st.players.slice(0, nPlayers).map((pl, i) => `
@@ -322,7 +322,7 @@ export class UI {
             <td class="num">${r.finished ? (r.rank === 1 || !winner.finished ? fmtTime(r.time) : '+' + (r.time - winner.time).toFixed(3)) : `${r.laps}/${ctx.laps} laps`}</td>
             <td class="num" style="${r.bestLap === bestOverall ? 'color:var(--accent-2);font-weight:700' : ''}">${fmtTime(r.bestLap)}</td></tr>`).join('')}
         </table>
-        ${ctx.newBest ? `<div class="notice" style="margin-top:12px">🏁 New personal best lap: <b>${fmtTime(ctx.newBest)}</b></div>` : ''}
+        ${ctx.newBest ? `<div class="notice" style="margin-top:12px">🏁 New personal best lap: <b>${fmtTime(ctx.newBest)}</b>${ctx.ghostSaved ? ' · saved as your ghost' : ''}</div>` : ''}
         ${careerHtml}
         <div class="row end" style="margin-top:18px">
           ${ctx.mode !== 'career' ? '<button data-retry>Race again</button>' : ''}
@@ -330,6 +330,6 @@ export class UI {
         </div>
       </div>`);
     this.on('[data-retry]', 'click', () => app.restartRace());
-    this.on('[data-continue]', 'click', () => ctx.mode === 'career' ? this.career() : this.mainMenu());
+    this.on('[data-continue]', 'click', () => app.leaveRace(ctx.mode === 'career' ? 'career' : 'menu'));
   }
 }

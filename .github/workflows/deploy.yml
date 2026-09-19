@@ -1,8 +1,10 @@
 name: Deploy to GitHub Pages
 
+# GitHub Pages is currently configured to deploy from the `main` branch directly
+# (Settings -> Pages -> "Deploy from a branch"), so this workflow is manual-only.
+# Switch the Pages source to "GitHub Actions" and re-add a `push` trigger if you
+# would rather deploy through Actions.
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:

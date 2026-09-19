@@ -6,8 +6,9 @@ hosted directly on GitHub Pages (or any static host).
 
 **Features**
 
-- Five hand-built circuits with distinct themes: club circuit, coastal esses, desert hairpins,
-  snowy alpine road and a neon night street circuit.
+- Nine circuits: five original themed tracks (club circuit, coastal esses, desert hairpins,
+  snowy alpine road, neon night city) plus four layouts inspired by real-world circuits:
+  Silverstone, Monza, Spa-Francorchamps and Interlagos.
 - Arcade driving model with drift handbrake, off-road grip loss, barrier and car-to-car collisions.
 - **Split-screen multiplayer**: two players on one keyboard (WASD vs arrow keys) or two gamepads.
   The screen splits left/right on wide displays and top/bottom on tall ones.
@@ -15,6 +16,8 @@ hosted directly on GitHub Pages (or any static host).
   points standings, prize money, a garage with four purchasable cars and four upgrade lines.
   Progress is saved in the browser (`localStorage`).
 - Quick Race and Time Trial modes with adjustable laps, opponent count and AI difficulty.
+  Time Trial replays your best lap as a translucent **ghost car** (stored per track and car).
+- Touch controls appear automatically on phones and tablets.
 - AI drivers with racing lines, braking for corners, overtaking/avoidance and un-stuck logic.
 - Per-player HUD with position, lap timer, best lap, minimap and live standings.
 - Procedural engine, skid, impact and countdown sounds (Web Audio, no asset files).
@@ -35,12 +38,13 @@ from `file://` URLs.
 
 Two options; both need nothing more than the repository contents.
 
-**Option A — GitHub Actions (included).** Push to `main` (or `master`). The workflow in
-`.github/workflows/deploy.yml` uploads the repository root to GitHub Pages. In the repository
-settings under *Pages*, set **Source** to **GitHub Actions** the first time.
+**Option A — Deploy from branch (current setup).** In *Settings → Pages*, choose
+**Deploy from a branch**, pick `main` and the `/ (root)` folder. Every push to `main` is
+published automatically. The included `.nojekyll` file makes Pages serve the files as-is.
 
-**Option B — Deploy from branch.** In *Settings → Pages*, choose **Deploy from a branch**, pick
-`main` and the `/ (root)` folder. The included `.nojekyll` file makes Pages serve the files as-is.
+**Option B — GitHub Actions.** `.github/workflows/deploy.yml` uploads the repository root to
+GitHub Pages. It is manual-only (`workflow_dispatch`) so it does not conflict with Option A; set
+**Source** to **GitHub Actions** and add a `push` trigger if you prefer this route.
 
 Your game will be available at `https://<user>.github.io/<repo>/`. All asset paths are relative,
 so it works from a project sub-path as well as from a custom domain.
@@ -56,6 +60,8 @@ so it works from a project sub-path as well as from a custom domain.
 | Reset to track    | `R`             | `.`                     | Y                  |
 | Pause             | `Esc`           | `Esc`                   | Start              |
 
+On touch devices, on-screen steering, gas, brake and drift buttons are shown for Player 1.
+
 Gamepad 1 controls Player 1 and gamepad 2 controls Player 2. Key schemes can be swapped in
 *Settings*.
 
@@ -70,7 +76,7 @@ src/race.js           race manager: physics loop, collisions, laps, ranking, spl
 src/car.js            car physics and procedural car meshes (4 body styles)
 src/ai.js             AI driver behaviour
 src/track.js          spline sampling, road/curb/barrier geometry, track queries
-src/tracks.js         track definitions (control points) and visual themes
+src/tracks.js         track definitions (control points, incl. real-circuit-inspired layouts) and themes
 src/scenery.js        ground, trees, buildings, mountains, grandstand, sponsor boards
 src/hud.js            per-player HUD and minimap
 src/ui.js             all menu screens (main, setup, career, garage, settings, results, pause)

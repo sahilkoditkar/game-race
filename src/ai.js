@@ -62,7 +62,7 @@ export function driveAI(car, ctx, dt) {
   // Target speed from curvature ahead
   const braking = 18 + speed * 1.4;
   const curv = Math.max(track.maxCurvatureAhead(idx, braking), 0.0004);
-  const latAcc = car.stats.grip * (1.5 + 1.3 * car.aiSkill);
+  const latAcc = car.stats.grip * 2.6 * (0.6 + 0.3 * car.aiSkill);
   let cornerSpeed = Math.sqrt(latAcc / curv);
   let target = Math.min(car.stats.maxSpeed * (0.82 + 0.2 * car.aiSkill), cornerSpeed);
 
