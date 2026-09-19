@@ -1,0 +1,366 @@
+import * as THREE from 'three';
+import { THEMES } from './tracks.js';
+
+const SPACING = 2; // metres between samples along the centreline
+
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  return [
+    0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+    0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+  ];
+}
+
+/** Sample a closed Catmull-Rom spline into uniformly spaced 2D points. */
+export function sampleSpline(points, spacing = SPACING) {
+  const n = points.length;
+  const raw = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = points[(i - 1 + n) % n], p1 = points[i], p2 = points[(i + 1) % n], p3 = points[(i + 2) % n];
+    for (let k = 0; k < 24; k++) raw.push(catmullRom(p0, p1, p2, p3, k / 24));
+  }
+  // Resample by arc length
+  const out = [];
+  let acc = 0;
+  out.push(raw[0]);
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i], b = raw[(i + 1) % raw.length];
+    const dx = b[0] - a[0], dz = b[1] - a[1];
+    const segLen = Math.hypot(dx, dz);
+    let d = acc;
+    while (d + spacing <= acc + segLen) {
+      d += spacing;
+      const f = (d - acc) / segLen;
+      out.push([a[0] + dx * f, a[1] + dz * f]);
+    }
+    acc += segLen;
+  }
+  // drop last if it's essentially the first
+  const last = out[out.length - 1];
+  if (Math.hypot(last[0] - out[0][0], last[1] - out[0][1]) < spacing * 0.5) out.pop();
+  return out;
+}
+
+export class Track {
+  constructor(def, quality = 'high') {
+    this.def = def;
+    this.theme = THEMES[def.theme];
+    this.halfWidth = def.width / 2;
+    this.wallOffset = this.halfWidth + 3.2;
+    this.spacing = SPACING;
+    this.group = new THREE.Group();
+    this.quality = quality;
+    this._buildSamples();
+    this._buildMeshes();
+    this.sectorCount = 8;
+    this.sectorSize = Math.ceil(this.samples.length / this.sectorCount);
+  }
+
+  _buildSamples() {
+    const pts = sampleSpline(this.def.points, SPACING);
+    const N = pts.length;
+    this.samples = [];
+    for (let i = 0; i < N; i++) {
+      const prev = pts[(i - 1 + N) % N], next = pts[(i + 1) % N];
+      let tx = next[0] - prev[0], tz = next[1] - prev[1];
+      const l = Math.hypot(tx, tz) || 1;
+      tx /= l; tz /= l;
+      this.samples.push({
+        p: new THREE.Vector3(pts[i][0], 0, pts[i][1]),
+        t: new THREE.Vector3(tx, 0, tz),
+        n: new THREE.Vector3(tz, 0, -tx), // left-hand normal
+        curv: 0,
+        heading: Math.atan2(tx, tz),
+      });
+    }
+    // signed curvature via heading change
+    for (let i = 0; i < N; i++) {
+      const a = this.samples[(i - 2 + N) % N].heading, b = this.samples[(i + 2) % N].heading;
+      let d = b - a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.samples[i].curv = d / (SPACING * 4);
+    }
+    this.length = N * SPACING;
+    // bounds for minimap
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const s of this.samples) {
+      minX = Math.min(minX, s.p.x); maxX = Math.max(maxX, s.p.x);
+      minZ = Math.min(minZ, s.p.z); maxZ = Math.max(maxZ, s.p.z);
+    }
+    this.bounds = { minX, maxX, minZ, maxZ };
+  }
+
+  get count() { return this.samples.length; }
+
+  /** Nearest sample index, searching around `hint` if provided. */
+  nearestIndex(pos, hint = null, window = 40) {
+    const N = this.samples.length;
+    let best = -1, bestD = Infinity;
+    if (hint === null || hint === undefined) {
+      for (let i = 0; i < N; i++) {
+        const s = this.samples[i];
+        const dx = s.p.x - pos.x, dz = s.p.z - pos.z;
+        const d = dx * dx + dz * dz;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    }
+    for (let k = -window; k <= window; k++) {
+      const i = (hint + k + N * 4) % N;
+      const s = this.samples[i];
+      const dx = s.p.x - pos.x, dz = s.p.z - pos.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  /** Signed lateral offset from centreline (positive = left). */
+  lateral(pos, idx) {
+    const s = this.samples[idx];
+    return (pos.x - s.p.x) * s.n.x + (pos.z - s.p.z) * s.n.z;
+  }
+
+  /** Continuous progress along the track in sample units. */
+  progressAt(pos, idx) {
+    const s = this.samples[idx];
+    const f = ((pos.x - s.p.x) * s.t.x + (pos.z - s.p.z) * s.t.z) / SPACING;
+    return idx + Math.max(-0.5, Math.min(0.5, f));
+  }
+
+  sample(i) { const N = this.samples.length; return this.samples[((i % N) + N) % N]; }
+
+  /** Max absolute curvature in the next `metres`. */
+  maxCurvatureAhead(idx, metres) {
+    const n = Math.ceil(metres / SPACING);
+    let m = 0;
+    for (let k = 0; k < n; k++) m = Math.max(m, Math.abs(this.sample(idx + k).curv));
+    return m;
+  }
+
+  sectorOf(idx) { return Math.min(this.sectorCount - 1, Math.floor(idx / this.sectorSize)); }
+
+  /** World position/heading of a grid slot behind the start line. */
+  gridSlot(slot) {
+    const row = Math.floor(slot / 2), side = slot % 2 === 0 ? 1 : -1;
+    const back = 6 + row * 7 + (slot % 2) * 3.5;
+    const idx = ((-Math.round(back / SPACING)) % this.count + this.count) % this.count;
+    const s = this.samples[idx];
+    const lateral = side * this.halfWidth * 0.42;
+    return {
+      x: s.p.x + s.n.x * lateral, z: s.p.z + s.n.z * lateral, heading: s.heading, idx,
+    };
+  }
+
+  // ------------------------------------------------------------------ Meshes
+  _buildMeshes() {
+    const th = this.theme;
+    const N = this.samples.length, hw = this.halfWidth;
+    const highQ = this.quality !== 'low';
+
+    // Road surface
+    const roadTex = makeRoadTexture(th);
+    roadTex.wrapT = THREE.RepeatWrapping;
+    roadTex.wrapS = THREE.ClampToEdgeWrapping;
+    const road = this._strip(N, hw, -hw, 0.12, (i, side) => [side === 0 ? 0 : 1, (i * SPACING) / 12]);
+    const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92, metalness: 0.02, color: 0xffffff });
+    const roadMesh = new THREE.Mesh(road, roadMat);
+    roadMesh.receiveShadow = true;
+    this.group.add(roadMesh);
+
+    // Runoff (gravel/grass verge between road and wall)
+    const runoffMat = new THREE.MeshStandardMaterial({ color: th.night ? 0x333540 : lerpColor(th.ground, 0x8a8a80, 0.55), roughness: 1 });
+    const runoffL = this._strip(N, this.wallOffset + 0.5, hw + 1.1, 0.1);
+    const runoffR = this._strip(N, -hw - 1.1, -this.wallOffset - 0.5, 0.1);
+    for (const g of [runoffL, runoffR]) { const m = new THREE.Mesh(g, runoffMat); m.receiveShadow = true; this.group.add(m); }
+
+    // Curbs (red/white) at corners, plain grey elsewhere
+    const curbL = this._strip(N, hw + 1.1, hw, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
+    const curbR = this._strip(N, -hw, -hw - 1.1, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
+    const curbMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+    for (const g of [curbL, curbR]) { const m = new THREE.Mesh(g, curbMat); m.receiveShadow = true; this.group.add(m); }
+
+    // Barriers
+    const wallH = 1.1;
+    const wallMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
+    for (const side of [1, -1]) {
+      const g = this._wall(N, side * this.wallOffset, wallH, (i) => {
+        const band = Math.floor(i / 6) % 2;
+        if (th.night) return band ? 0x2f80ff : 0xf5f5f5;
+        return band ? 0xe53935 : 0xf4f4f4;
+      });
+      const m = new THREE.Mesh(g, wallMat);
+      m.castShadow = highQ; m.receiveShadow = true;
+      this.group.add(m);
+      // top rail
+      const rail = this._strip(N, side * this.wallOffset + 0.35, side * this.wallOffset - 0.35, wallH, null, () => 0x6d7078);
+      this.group.add(new THREE.Mesh(rail, wallMat));
+    }
+
+    // Start / finish line
+    const s0 = this.samples[0];
+    const lineGeo = new THREE.PlaneGeometry(hw * 2, 3);
+    const lineTex = makeCheckerTexture();
+    lineTex.repeat.set(8, 2); lineTex.wrapS = lineTex.wrapT = THREE.RepeatWrapping;
+    const line = new THREE.Mesh(lineGeo, new THREE.MeshStandardMaterial({ map: lineTex, roughness: 0.9 }));
+    line.rotation.set(-Math.PI / 2, 0, 0);
+    line.position.y = 0.14;
+    const pivot = new THREE.Group();
+    pivot.position.set(s0.p.x, 0.04, s0.p.z);
+    pivot.rotation.y = s0.heading;
+    line.position.set(0, 0, 0);
+    pivot.add(line);
+    this.group.add(pivot);
+
+    // Start gantry
+    const gantry = new THREE.Group();
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x8a8f99, metalness: 0.5, roughness: 0.4 });
+    const postGeo = new THREE.BoxGeometry(0.5, 7, 0.5);
+    for (const sd of [1, -1]) {
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.set(sd * (this.wallOffset + 1.2), 3.5, 0);
+      post.castShadow = highQ; gantry.add(post);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(this.wallOffset * 2 + 3, 1.6, 1), new THREE.MeshStandardMaterial({ map: makeBannerTexture(this.def.name, th), roughness: 0.6 }));
+    beam.position.set(0, 6.4, 0); beam.castShadow = highQ; gantry.add(beam);
+    // start lights
+    const lightGeo = new THREE.SphereGeometry(0.28, 12, 12);
+    this.startLights = [];
+    for (let i = 0; i < 5; i++) {
+      const m = new THREE.Mesh(lightGeo, new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0x000000 }));
+      m.position.set((i - 2) * 1.2, 5.3, 0.6); gantry.add(m); this.startLights.push(m);
+    }
+    gantry.position.set(s0.p.x, 0, s0.p.z);
+    gantry.rotation.y = s0.heading;
+    this.group.add(gantry);
+  }
+
+  setStartLights(count, go) {
+    this.startLights.forEach((m, i) => {
+      if (go) { m.material.color.set(0x00ff55); m.material.emissive.set(0x00ff55); }
+      else if (i < count) { m.material.color.set(0xff2020); m.material.emissive.set(0xff2020); }
+      else { m.material.color.set(0x330000); m.material.emissive.set(0x000000); }
+    });
+  }
+
+  /** Closed triangle strip between lateral offsets a (left) and b (right). */
+  _strip(N, a, b, y, uvFn = null, colorFn = null) {
+    const pos = new Float32Array(N * 2 * 3);
+    const uv = new Float32Array(N * 2 * 2);
+    const col = colorFn ? new Float32Array(N * 2 * 3) : null;
+    const c = new THREE.Color();
+    for (let i = 0; i < N; i++) {
+      const s = this.samples[i];
+      const ax = s.p.x + s.n.x * a, az = s.p.z + s.n.z * a;
+      const bx = s.p.x + s.n.x * b, bz = s.p.z + s.n.z * b;
+      pos.set([ax, y, az, bx, y, bz], i * 6);
+      const ua = uvFn ? uvFn(i, 0) : [0, i * SPACING / 8], ub = uvFn ? uvFn(i, 1) : [1, i * SPACING / 8];
+      uv.set([ua[0], ua[1], ub[0], ub[1]], i * 4);
+      if (col) { c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6); }
+    }
+    const idx = [];
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      const a0 = i * 2, b0 = i * 2 + 1, a1 = j * 2, b1 = j * 2 + 1;
+      idx.push(a0, b0, a1, b0, b1, a1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  _wall(N, offset, h, colorFn) {
+    const pos = new Float32Array(N * 2 * 3);
+    const col = new Float32Array(N * 2 * 3);
+    const uv = new Float32Array(N * 2 * 2);
+    const c = new THREE.Color();
+    for (let i = 0; i < N; i++) {
+      const s = this.samples[i];
+      const x = s.p.x + s.n.x * offset, z = s.p.z + s.n.z * offset;
+      pos.set([x, 0, z, x, h, z], i * 6);
+      c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
+      uv.set([i / N, 0, i / N, 1], i * 4);
+    }
+    const idx = [];
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      idx.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+}
+
+function curbColor(curv, i) {
+  if (Math.abs(curv) < 0.006) return 0x8c8f96;
+  return Math.floor(i / 3) % 2 ? 0xe53935 : 0xf4f4f4;
+}
+
+function lerpColor(a, b, t) {
+  const ca = new THREE.Color(a), cb = new THREE.Color(b);
+  return ca.lerp(cb, t).getHex();
+}
+
+function makeRoadTexture(theme) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  const base = new THREE.Color(theme.road);
+  ctx.fillStyle = `rgb(${base.r * 255 | 0},${base.g * 255 | 0},${base.b * 255 | 0})`;
+  ctx.fillRect(0, 0, 256, 256);
+  // asphalt noise
+  const img = ctx.getImageData(0, 0, 256, 256);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 26;
+    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+  }
+  ctx.putImageData(img, 0, 0);
+  // edge lines
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillRect(6, 0, 5, 256);
+  ctx.fillRect(245, 0, 5, 256);
+  // dashed centre line
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillRect(126, 0, 4, 100);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+function makeCheckerTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 64, 64);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 32, 32); ctx.fillRect(32, 32, 32, 32);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeBannerTexture(name, theme) {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 96;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = theme.night ? '#12142a' : '#1a1c22';
+  ctx.fillRect(0, 0, 1024, 96);
+  ctx.fillStyle = '#ff5a1f'; ctx.fillRect(0, 0, 1024, 10); ctx.fillRect(0, 86, 1024, 10);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'italic 900 52px Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(name.toUpperCase(), 512, 50);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
