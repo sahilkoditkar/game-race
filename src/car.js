@@ -184,6 +184,21 @@ export class Car {
       }
     }
 
+    // Point-to-point stages: solid barriers across both ends of the road
+    if (track.open) {
+      const N = track.samples.length;
+      const f = track._param(this.pos, this.trackIdx);
+      if ((this.trackIdx >= N - 1 && f > 0.2) || (this.trackIdx <= 0 && f < -0.2)) {
+        const along = this.trackIdx >= N - 1 ? 0.4 : -0.4; // metres from the end sample
+        const latC = Math.max(-samp.wall + 1, Math.min(samp.wall - 1, lat2));
+        this.pos.x = samp.p.x + samp.t.x * along + samp.n.x * latC;
+        this.pos.z = samp.p.z + samp.t.z * along + samp.n.z * latC;
+        this.wallHit = Math.max(this.wallHit, Math.abs(this.vf));
+        this.vf *= -0.2; this.vr = 0;
+        this.vel.set(fx * this.vf, 0, fz * this.vf);
+      }
+    }
+
     // Elevation: sit on the road surface, pitch with it, and feel gravity on climbs
     const dot = fx * samp.t.x + fz * samp.t.z;
     const grade = track.slopeAtPos(this.pos, this.trackIdx) * dot; // positive = climbing in the direction we face

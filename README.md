@@ -11,6 +11,9 @@ hosted directly on GitHub Pages (or any static host).
   circuits: Silverstone, Monza, Spa-Francorchamps, Interlagos, Red Bull Ring, Bahrain, Circuit
   of the Americas and Zandvoort. Real circuits carry hand-authored height profiles (Eau Rouge
   climbs, the Red Bull Ring hillside, the Senna S plunge); originals get rolling terrain.
+- Four point-to-point stages (6–10 km): a 390 m mountain hillclimb, a coastal highway run, a
+  desert dune crossing and a narrow forest rally stage. Single run from start to finish, with
+  elevation, varying width, a finish gantry and barriers at both ends.
 - Nine cars, from a vintage roadster and a muscle car to a rally hatch, supercar, hypercar,
   endurance prototype and open-wheel single seater.
 - Arcade driving model with a grip-limited bicycle steering model, drift handbrake, off-road

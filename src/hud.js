@@ -19,8 +19,8 @@ export class HUD {
         <div class="top-left">
           <div class="name">${config.players[i].name}</div>
           <div class="pos"><b>-</b>${cars.length > 1 ? `<span class="of">/ ${cars.length}</span>` : ''}</div>
-          <div class="lap">LAP <b>0</b><span>/${config.laps}</span></div>
-          <div class="time"><span>LAP</span> <b>0:00.000</b></div>
+          <div class="lap">${track.open ? 'STAGE <b></b><span></span>' : `LAP <b>0</b><span>/${config.laps}</span>`}</div>
+          <div class="time"><span>${track.open ? 'TIME' : 'LAP'}</span> <b>0:00.000</b></div>
           <div class="time"><span>BEST</span> <b>--:--.---</b></div>
         </div>
         <div class="standings"></div>
@@ -33,7 +33,7 @@ export class HUD {
         <div class="wrong hidden">⚠ WRONG WAY</div>`;
       const q = (sel) => el.querySelector(sel);
       this.panels.push({
-        el, pos: q('.pos b'), lap: q('.lap b'), lapTime: q('.time:nth-of-type(4) b'), best: q('.time:nth-of-type(5) b'),
+        el, pos: q('.pos b'), lap: q('.lap b'), lapSpan: q('.lap span'), lapTime: q('.time:nth-of-type(4) b'), best: q('.time:nth-of-type(5) b'),
         speed: q('.speed b'), bar: q('.gear-bar i'), map: q('.minimap'), msg: q('.msg'), msgMain: q('.msg .main'), msgSub: q('.msg .sub'),
         wrong: q('.wrong'), standings: q('.standings'), msgTimer: 0,
       });
@@ -65,7 +65,7 @@ export class HUD {
       const x = s.p.x * scale + this.mapOff.x, y = s.p.z * scale + this.mapOff.z;
       if (i === 0) this.mapPath.moveTo(x, y); else this.mapPath.lineTo(x, y);
     });
-    this.mapPath.closePath();
+    if (!this.track.open) this.mapPath.closePath();
   }
 
   _drawMinimap(p, me) {
@@ -74,9 +74,10 @@ export class HUD {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 11; ctx.stroke(this.mapPath);
     ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 7; ctx.stroke(this.mapPath);
-    const s0 = this.track.samples[0];
+    const s0 = this.track.samples[this.track.startIdx || 0];
     ctx.fillStyle = '#fff';
     ctx.fillRect(s0.p.x * this.mapScale + this.mapOff.x - 4, s0.p.z * this.mapScale + this.mapOff.z - 4, 8, 8);
+    if (this.track.open) { const sf = this.track.samples[this.track.finishIdx]; ctx.fillStyle = '#3ddc84'; ctx.fillRect(sf.p.x * this.mapScale + this.mapOff.x - 4, sf.p.z * this.mapScale + this.mapOff.z - 4, 8, 8); }
     for (const c of this.cars) {
       const x = c.pos.x * this.mapScale + this.mapOff.x, y = c.pos.z * this.mapScale + this.mapOff.z;
       ctx.beginPath();
@@ -109,7 +110,11 @@ export class HUD {
       const p = this.panels[i];
       if (!p) return;
       p.pos.textContent = ORD(car.rank);
-      p.lap.textContent = Math.min(race.config.laps, Math.max(0, car.lap));
+      if (race.track.open) {
+        const remain = Math.max(0, (race.track.finishIdx - car.trackIdx) * race.track.spacing / 1000);
+        p.lap.textContent = car.finished ? 'DONE' : `${remain.toFixed(1)} km`;
+        p.lapSpan.textContent = car.finished ? '' : ' to go';
+      } else p.lap.textContent = Math.min(race.config.laps, Math.max(0, car.lap));
       p.lapTime.textContent = race.state === 'countdown' ? '0:00.000' : fmtTime(car.finished ? car.finishTime : race.time - car.lapStart);
       p.best.textContent = fmtTime(car.bestLap);
       const kmh = Math.round(car.speed * 3.6);
