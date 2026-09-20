@@ -51,6 +51,8 @@ export class Track {
     this.group = new THREE.Group();
     this.quality = quality;
     this._buildSamples();
+    this.seaLevel = Math.min(0, this.minHeight) - 6;
+    if (this.theme.water !== null) this.coastZ = this.bounds.maxZ + 50;
     this._buildMeshes();
     this.sectorCount = 8;
     this.sectorSize = Math.ceil(this.samples.length / this.sectorCount);
@@ -59,6 +61,7 @@ export class Track {
   _buildSamples() {
     const pts = sampleSpline(this.def.points, SPACING);
     const N = pts.length;
+    const heights = this._elevationProfile(N);
     this.samples = [];
     for (let i = 0; i < N; i++) {
       const prev = pts[(i - 1 + N) % N], next = pts[(i + 1) % N];
@@ -66,13 +69,17 @@ export class Track {
       const l = Math.hypot(tx, tz) || 1;
       tx /= l; tz /= l;
       this.samples.push({
-        p: new THREE.Vector3(pts[i][0], 0, pts[i][1]),
+        p: new THREE.Vector3(pts[i][0], heights[i], pts[i][1]),
         t: new THREE.Vector3(tx, 0, tz),
         n: new THREE.Vector3(tz, 0, -tx), // left-hand normal
         curv: 0,
+        slope: (heights[(i + 1) % N] - heights[(i - 1 + N) % N]) / (2 * SPACING),
         heading: Math.atan2(tx, tz),
       });
     }
+    this.minHeight = Math.min(...heights);
+    this.maxHeight = Math.max(...heights);
+    this._buildGrid();
     // signed curvature via heading change
     for (let i = 0; i < N; i++) {
       const a = this.samples[(i - 2 + N) % N].heading, b = this.samples[(i + 2) % N].heading;
@@ -92,6 +99,119 @@ export class Track {
   }
 
   get count() { return this.samples.length; }
+
+  /** Height profile around the lap, one value per sample. */
+  _elevationProfile(N) {
+    let keys = this.def.elevation;
+    if (!keys) {
+      // Seeded rolling profile for tracks without an authored one.
+      const amp = this.def.elevationAmp ?? 6;
+      let seed = 0;
+      for (const ch of this.def.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+      const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      const K = 5 + Math.floor((N * SPACING) / 350);
+      keys = [[0, 0]];
+      for (let k = 1; k < K; k++) keys.push([k / K + (rand() - 0.5) * (0.4 / K), (rand() * 2 - 1) * amp]);
+    }
+    keys = [...keys].sort((a, b) => a[0] - b[0]);
+    const M = keys.length;
+    const out = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      // find segment
+      let k = 0;
+      while (k < M - 1 && keys[k + 1][0] <= t) k++;
+      const t0 = keys[k][0], t1 = k + 1 < M ? keys[k + 1][0] : keys[0][0] + 1;
+      const u = (t - t0) / Math.max(1e-6, t1 - t0);
+      const p0 = keys[(k - 1 + M) % M][1], p1 = keys[k][1], p2 = keys[(k + 1) % M][1], p3 = keys[(k + 2) % M][1];
+      const u2 = u * u, u3 = u2 * u;
+      out[i] = 0.5 * ((2 * p1) + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
+    }
+    // smooth and limit gradient so the road never gets absurdly steep
+    const maxStep = SPACING * 0.14;
+    for (let pass = 0; pass < 3; pass++) {
+      const copy = Float32Array.from(out);
+      for (let i = 0; i < N; i++) {
+        let acc = 0;
+        for (let k = -6; k <= 6; k++) acc += copy[(i + k + N) % N];
+        out[i] = acc / 13;
+      }
+      for (let i = 0; i < N * 2; i++) {
+        const a = i % N, b = (i + 1) % N;
+        const d = out[b] - out[a];
+        if (d > maxStep) { out[b] = out[a] + maxStep; }
+        else if (d < -maxStep) { out[b] = out[a] - maxStep; }
+      }
+    }
+    // make the start/finish line sit exactly at height 0 and blend the loop closure
+    const off = out[0];
+    for (let i = 0; i < N; i++) out[i] -= off;
+    return out;
+  }
+
+  _buildGrid() {
+    this.cell = 40;
+    this.grid = new Map();
+    this.samples.forEach((s, i) => {
+      const key = `${Math.floor(s.p.x / this.cell)},${Math.floor(s.p.z / this.cell)}`;
+      if (!this.grid.has(key)) this.grid.set(key, []);
+      this.grid.get(key).push(i);
+    });
+  }
+
+  /** Nearest sample to any world point using the spatial grid. Returns { idx, dist }. */
+  nearestGlobal(x, z) {
+    const cx = Math.floor(x / this.cell), cz = Math.floor(z / this.cell);
+    let best = -1, bestD = Infinity;
+    for (let ring = 0; ring <= 4; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) for (let dz = -ring; dz <= ring; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+        const list = this.grid.get(`${cx + dx},${cz + dz}`);
+        if (!list) continue;
+        for (const i of list) {
+          const s = this.samples[i];
+          const d = (s.p.x - x) * (s.p.x - x) + (s.p.z - z) * (s.p.z - z);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+      }
+      if (best >= 0 && Math.sqrt(bestD) < ring * this.cell) break;
+    }
+    return { idx: best, dist: best >= 0 ? Math.sqrt(bestD) : Infinity };
+  }
+
+  /** Road height under a world position (uses the nearest-sample hint for speed). */
+  heightAtPos(pos, idx) {
+    const N = this.samples.length;
+    const s = this.samples[idx];
+    const f = ((pos.x - s.p.x) * s.t.x + (pos.z - s.p.z) * s.t.z) / SPACING;
+    const j = f >= 0 ? (idx + 1) % N : (idx - 1 + N) % N;
+    const w = Math.min(1, Math.abs(f));
+    return s.p.y * (1 - w) + this.samples[j].p.y * w;
+  }
+
+  /** Terrain height for scenery / ground mesh. Hugs the road nearby, rolls freely far away. */
+  terrainHeight(x, z) {
+    const { idx, dist } = this.nearestGlobal(x, z);
+    const th = this.theme;
+    const A = th.hills || 8;
+    let noise = A * (0.5 * Math.sin(x * 0.011 + 1.3) * Math.cos(z * 0.009 - 0.4) + 0.3 * Math.sin(x * 0.027 - z * 0.021) + 0.2 * Math.sin(z * 0.043 + x * 0.017)) - A * 0.15;
+    let h;
+    if (idx < 0 || dist > 140) h = noise;
+    else {
+      const road = this.samples[idx].p.y;
+      const corridor = this.wallOffset + 3;
+      if (dist < corridor) h = road - 2.5;                       // trench hidden under the road
+      else {
+        const w = smoothstep(30, 90, dist);
+        h = (road - 0.35) * (1 - w) + noise * w;
+      }
+    }
+    if (th.water !== null && this.coastZ !== undefined) {
+      const w = smoothstep(this.coastZ, this.coastZ + 90, z);
+      h = h * (1 - w) + (this.seaLevel - 3) * w;
+    }
+    return h;
+  }
 
   /** Nearest sample index, searching around `hint` if provided. */
   nearestIndex(pos, hint = null, window = 40) {
@@ -149,7 +269,7 @@ export class Track {
     const s = this.samples[idx];
     const lateral = side * this.halfWidth * 0.42;
     return {
-      x: s.p.x + s.n.x * lateral, z: s.p.z + s.n.z * lateral, heading: s.heading, idx,
+      x: s.p.x + s.n.x * lateral, y: s.p.y, z: s.p.z + s.n.z * lateral, heading: s.heading, idx,
     };
   }
 
@@ -207,7 +327,7 @@ export class Track {
     line.rotation.set(-Math.PI / 2, 0, 0);
     line.position.y = 0.14;
     const pivot = new THREE.Group();
-    pivot.position.set(s0.p.x, 0.04, s0.p.z);
+    pivot.position.set(s0.p.x, s0.p.y + 0.04, s0.p.z);
     pivot.rotation.y = s0.heading;
     line.position.set(0, 0, 0);
     pivot.add(line);
@@ -231,7 +351,7 @@ export class Track {
       const m = new THREE.Mesh(lightGeo, new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0x000000 }));
       m.position.set((i - 2) * 1.2, 5.3, 0.6); gantry.add(m); this.startLights.push(m);
     }
-    gantry.position.set(s0.p.x, 0, s0.p.z);
+    gantry.position.set(s0.p.x, s0.p.y, s0.p.z);
     gantry.rotation.y = s0.heading;
     this.group.add(gantry);
   }
@@ -254,7 +374,8 @@ export class Track {
       const s = this.samples[i];
       const ax = s.p.x + s.n.x * a, az = s.p.z + s.n.z * a;
       const bx = s.p.x + s.n.x * b, bz = s.p.z + s.n.z * b;
-      pos.set([ax, y, az, bx, y, bz], i * 6);
+      const yy = s.p.y + y;
+      pos.set([ax, yy, az, bx, yy, bz], i * 6);
       const ua = uvFn ? uvFn(i, 0) : [0, i * SPACING / 8], ub = uvFn ? uvFn(i, 1) : [1, i * SPACING / 8];
       uv.set([ua[0], ua[1], ub[0], ub[1]], i * 4);
       if (col) { c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6); }
@@ -282,7 +403,7 @@ export class Track {
     for (let i = 0; i < N; i++) {
       const s = this.samples[i];
       const x = s.p.x + s.n.x * offset, z = s.p.z + s.n.z * offset;
-      pos.set([x, 0, z, x, h, z], i * 6);
+      pos.set([x, s.p.y - 3, z, x, s.p.y + h, z], i * 6);
       c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
       uv.set([i / N, 0, i / N, 1], i * 4);
     }
@@ -300,6 +421,8 @@ export class Track {
     return g;
   }
 }
+
+function smoothstep(a, b, x) { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
 function curbColor(curv, i) {
   if (Math.abs(curv) < 0.006) return 0x8c8f96;

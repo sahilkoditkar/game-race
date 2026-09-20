@@ -6,10 +6,15 @@ hosted directly on GitHub Pages (or any static host).
 
 **Features**
 
-- Nine circuits: five original themed tracks (club circuit, coastal esses, desert hairpins,
-  snowy alpine road, neon night city) plus four layouts inspired by real-world circuits:
-  Silverstone, Monza, Spa-Francorchamps and Interlagos.
-- Arcade driving model with drift handbrake, off-road grip loss, barrier and car-to-car collisions.
+- Sixteen circuits with elevation: eight original themed tracks (club circuit, coast, harbour,
+  desert, canyon, alpine, forest, neon night city) and eight layouts inspired by real-world
+  circuits: Silverstone, Monza, Spa-Francorchamps, Interlagos, Red Bull Ring, Bahrain, Circuit
+  of the Americas and Zandvoort. Real circuits carry hand-authored height profiles (Eau Rouge
+  climbs, the Red Bull Ring hillside, the Senna S plunge); originals get rolling terrain.
+- Nine cars, from a vintage roadster and a muscle car to a rally hatch, supercar, hypercar,
+  endurance prototype and open-wheel single seater.
+- Arcade driving model with a grip-limited bicycle steering model, drift handbrake, off-road
+  grip loss (the rally car barely cares), slope gravity, barrier and car-to-car collisions.
 - **Split-screen multiplayer**: two players on one keyboard (WASD vs arrow keys) or two gamepads.
   The screen splits left/right on wide displays and top/bottom on tall ones.
 - **Career mode**: four championships (Rookie Cup → Pro Series → Grand Prix → Legends Endurance),
@@ -62,8 +67,9 @@ so it works from a project sub-path as well as from a custom domain.
 
 On touch devices, on-screen steering, gas, brake and drift buttons are shown for Player 1.
 
-Gamepad 1 controls Player 1 and gamepad 2 controls Player 2. Key schemes can be swapped in
-*Settings*.
+Each player picks their controls (WASD, arrows, gamepad 1, gamepad 2, or touch) on the race
+setup screen; the choice is remembered. Career uses the Player 1 choice, changeable on the
+career screen or in *Settings*.
 
 ## Project layout
 
@@ -89,9 +95,11 @@ src/audio.js          procedural Web Audio sound effects
 ## Adding a track
 
 Add an entry to `src/tracks.js` with an `id`, `name`, `theme` (one of `grass`, `coastal`,
-`desert`, `alpine`, `city`), a road `width` and a list of 2D control `points`. The points are
-joined by a closed Catmull-Rom spline; keep neighbouring points roughly 80–150 m apart and avoid
-crossings. The car starts at the first point heading toward the second.
+`desert`, `forest`, `alpine`, `city`), `kind` (`real` or `original`), a road `width` and a list
+of 2D control `points`. The points are joined by a closed Catmull-Rom spline; keep neighbouring
+points roughly 80–150 m apart and avoid crossings. The car starts at the first point heading
+toward the second. Optionally add `elevation: [[t, height], ...]` keypoints (t is the lap
+fraction from the start line) or an `elevationAmp` for a seeded rolling profile.
 
 ## License
 

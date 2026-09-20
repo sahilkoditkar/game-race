@@ -5,6 +5,19 @@ export const SCHEMES = {
   arrows: { name: 'Arrow keys', up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], hb: ['ShiftRight', 'ControlRight', 'Slash'], reset: ['Period'] },
 };
 
+/** Selectable control options. Each maps to a keyboard scheme and/or a gamepad index. */
+export const CONTROLS = [
+  { id: 'wasd', name: 'Keyboard · WASD', scheme: 'wasd', pad: -1, keys: 'W A S D · Shift' },
+  { id: 'arrows', name: 'Keyboard · Arrows', scheme: 'arrows', pad: -1, keys: '↑ ← ↓ → · R-Shift' },
+  { id: 'pad0', name: 'Gamepad 1', scheme: 'none', pad: 0, keys: 'Stick · RT/LT · B' },
+  { id: 'pad1', name: 'Gamepad 2', scheme: 'none', pad: 1, keys: 'Stick · RT/LT · B' },
+  { id: 'touch', name: 'Touch', scheme: 'none', pad: -1, keys: 'On-screen buttons', touchOnly: true },
+];
+export function getControl(id) { return CONTROLS.find(c => c.id === id) || CONTROLS[0]; }
+export function padConnected(i) {
+  try { const pads = navigator.getGamepads ? navigator.getGamepads() : []; return !!(pads && pads[i]); } catch (e) { return false; }
+}
+
 export class Input {
   constructor() {
     this.keys = new Set();
@@ -37,14 +50,16 @@ export class Input {
 
   /** Read a player's controls. Touch controls are merged into player 0. */
   read(schemeId, padIndex, playerIndex = 0) {
-    const s = SCHEMES[schemeId] || SCHEMES.wasd;
+    const s = SCHEMES[schemeId] || null;
     const out = { throttle: 0, brake: 0, steer: 0, handbrake: false, reset: false, pause: false };
-    if (this.anyDown(s.up)) out.throttle = 1;
-    if (this.anyDown(s.down)) out.brake = 1;
-    if (this.anyDown(s.left)) out.steer -= 1;
-    if (this.anyDown(s.right)) out.steer += 1;
-    out.handbrake = this.anyDown(s.hb);
-    out.reset = s.reset.some(c => this.pressed.has(c));
+    if (s) {
+      if (this.anyDown(s.up)) out.throttle = 1;
+      if (this.anyDown(s.down)) out.brake = 1;
+      if (this.anyDown(s.left)) out.steer -= 1;
+      if (this.anyDown(s.right)) out.steer += 1;
+      out.handbrake = this.anyDown(s.hb);
+      out.reset = s.reset.some(c => this.pressed.has(c));
+    }
 
     const pad = padIndex >= 0 ? this.gamepad(padIndex) : null;
     if (pad) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Input } from './input.js';
+import { Input, getControl } from './input.js';
 import { AudioSystem } from './audio.js';
 import { UI } from './ui.js';
 import { Race } from './race.js';
@@ -129,7 +129,8 @@ class App {
 
   // ------------------------------------------------------------ Races
   _playerEntry(p, i, stats, shape) {
-    return { name: p.name, color: PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length], stats, shape, scheme: p.scheme, pad: p.pad ?? i };
+    const c = getControl(p.control || (i === 0 ? 'wasd' : 'arrows'));
+    return { name: p.name, color: PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length], stats, shape, scheme: c.scheme, pad: c.pad };
   }
 
   startQuickRace(mode) {
@@ -153,7 +154,7 @@ class App {
     if (!ev) return;
     const track = getTrack(ev.track);
     const car = getCar(this.profile.selected);
-    const players = [this._playerEntry({ name: this.profile.name, colorIndex: this.profile.colorIndex || 0, scheme: this.profile.settings.p1Scheme, pad: 0 }, 0, playerStats(this.profile), car.shape)];
+    const players = [this._playerEntry({ name: this.profile.name, colorIndex: this.profile.colorIndex || 0, control: this.profile.settings.p1Control }, 0, playerStats(this.profile), car.shape)];
     const ai = seriesField(series);
     this.startRace({ track, laps: ev.laps, players, ai, mode: 'career', quality: this.profile.settings.quality },
       { mode: 'career', seriesId, trackName: track.name, laps: ev.laps, trackId: track.id, carId: car.id });

@@ -19,19 +19,30 @@ export function buildScenery(track, quality = 'high') {
   const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
   const extent = Math.max(b.maxX - b.minX, b.maxZ - b.minZ);
 
-  // Ground
-  const groundSize = 4000;
+  // Terrain: a height-mapped ground that hugs the road and rolls away from it
   const groundTex = makeGroundTexture(th);
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
-  groundTex.repeat.set(groundSize / 40, groundSize / 40);
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundSize, groundSize),
-    new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1, metalness: 0 })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(cx, -0.08, cz);
-  ground.receiveShadow = true;
-  g.add(ground);
+  const terrainSize = extent + 1100;
+  const cellsN = Math.min(260, Math.round(terrainSize / (highQ ? 9 : 14)));
+  groundTex.repeat.set(terrainSize / 40, terrainSize / 40);
+  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, cellsN, cellsN);
+  terrainGeo.rotateX(-Math.PI / 2);
+  const tp = terrainGeo.attributes.position;
+  for (let i = 0; i < tp.count; i++) {
+    const x = tp.getX(i) + cx, z = tp.getZ(i) + cz;
+    tp.setY(i, track.terrainHeight(x, z));
+  }
+  terrainGeo.computeVertexNormals();
+  const terrain = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1, metalness: 0 }));
+  terrain.position.set(cx, 0, cz);
+  terrain.receiveShadow = true;
+  g.add(terrain);
+  // Far ground so the horizon never shows the void
+  const far = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshStandardMaterial({ color: th.ground, roughness: 1 }));
+  far.rotation.x = -Math.PI / 2;
+  far.position.set(cx, Math.min(0, track.minHeight) - (th.hills || 8) - 6, cz);
+  g.add(far);
+  const hAt = (x, z) => track.terrainHeight(x, z);
 
   // Water for coastal
   if (th.water !== null) {
@@ -40,20 +51,11 @@ export function buildScenery(track, quality = 'high') {
       new THREE.MeshStandardMaterial({ color: th.water, roughness: 0.15, metalness: 0.4, transparent: true, opacity: 0.92 })
     );
     water.rotation.x = -Math.PI / 2;
-    water.position.set(cx, 0.05, b.maxZ + 780);
+    water.position.set(cx, track.seaLevel, b.maxZ + 780);
     g.add(water);
-    // beach strip
-    const sand = new THREE.Mesh(new THREE.PlaneGeometry(3000, 120), new THREE.MeshStandardMaterial({ color: 0xe6d3a3, roughness: 1 }));
-    sand.rotation.x = -Math.PI / 2;
-    sand.position.set(cx, 0.03, b.maxZ + 120);
-    g.add(sand);
   }
 
-  const farFromTrack = (x, z, margin) => {
-    const idx = track.nearestIndex(new THREE.Vector3(x, 0, z));
-    const s = track.samples[idx];
-    return Math.hypot(s.p.x - x, s.p.z - z) > margin;
-  };
+  const farFromTrack = (x, z, margin) => track.nearestGlobal(x, z).dist > margin;
 
   // Trees / cacti / pines
   if (th.trees !== 'none') {
@@ -66,7 +68,7 @@ export function buildScenery(track, quality = 'high') {
       const z = cz + (rand() - 0.5) * (extent + 500);
       if (!farFromTrack(x, z, track.wallOffset + 6 + rand() * 12)) continue;
       if (th.water !== null && z > b.maxZ + 60) continue;
-      positions.push([x, z, 0.7 + rand() * 0.8, rand() * Math.PI * 2]);
+      positions.push([x, z, 0.7 + rand() * 0.8, rand() * Math.PI * 2, hAt(x, z)]);
     }
     addTrees(g, th.trees, positions, highQ);
   }
@@ -82,7 +84,7 @@ export function buildScenery(track, quality = 'high') {
       const w = 14 + rand() * 22, d = 14 + rand() * 22;
       if (!farFromTrack(x, z, track.wallOffset + Math.max(w, d) * 0.75 + 4)) continue;
       if (boxes.some(o => Math.abs(o.x - x) < (o.w + w) / 2 + 3 && Math.abs(o.z - z) < (o.d + d) / 2 + 3)) continue;
-      boxes.push({ x, z, w, d, h: 18 + rand() * 90, hue: rand() });
+      boxes.push({ x, z, w, d, h: 18 + rand() * 90, hue: rand(), y: hAt(x, z) });
     }
     addBuildings(g, boxes, rand);
     addStreetLights(g, track, highQ);
@@ -96,13 +98,14 @@ export function buildScenery(track, quality = 'high') {
     const r = 1250 + rand() * 350;
     const h = 180 + rand() * 260;
     const m = new THREE.Mesh(new THREE.ConeGeometry(220 + rand() * 180, h, 6 + Math.floor(rand() * 3)), mountainMat);
-    m.position.set(cx + Math.cos(a) * r, h / 2 - 5, cz + Math.sin(a) * r);
+    const base = Math.min(0, track.minHeight) - 25;
+    m.position.set(cx + Math.cos(a) * r, base + h / 2, cz + Math.sin(a) * r);
     m.rotation.y = rand() * Math.PI;
     g.add(m);
     if (th.trees === 'pine' || th.trees === 'round') {
       // snow caps
       const cap = new THREE.Mesh(new THREE.ConeGeometry(70 + rand() * 40, h * 0.3, 6), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }));
-      cap.position.set(m.position.x, h - h * 0.15 - 5, m.position.z);
+      cap.position.set(m.position.x, base + h - h * 0.15, m.position.z);
       cap.rotation.y = m.rotation.y;
       g.add(cap);
     }
@@ -112,7 +115,7 @@ export function buildScenery(track, quality = 'high') {
   const s0 = track.samples[0];
   const stand = buildGrandstand(th, rand);
   const side = -1; // right side of the track
-  stand.position.set(s0.p.x + s0.n.x * side * (track.wallOffset + 12), 0, s0.p.z + s0.n.z * side * (track.wallOffset + 12));
+  stand.position.set(s0.p.x + s0.n.x * side * (track.wallOffset + 12), s0.p.y - 0.3, s0.p.z + s0.n.z * side * (track.wallOffset + 12));
   stand.rotation.y = s0.heading + Math.PI / 2 * side;
   g.add(stand);
 
@@ -123,7 +126,7 @@ export function buildScenery(track, quality = 'high') {
     const s = track.samples[i];
     const sd = rand() > 0.5 ? 1 : -1;
     const m = new THREE.Mesh(boardGeo, boardMat);
-    m.position.set(s.p.x + s.n.x * sd * (track.wallOffset + 4), 1.3, s.p.z + s.n.z * sd * (track.wallOffset + 4));
+    m.position.set(s.p.x + s.n.x * sd * (track.wallOffset + 4), s.p.y + 1.0, s.p.z + s.n.z * sd * (track.wallOffset + 4));
     m.rotation.y = s.heading;
     m.castShadow = highQ;
     g.add(m);
@@ -156,15 +159,15 @@ function addTrees(g, kind, positions, highQ) {
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const col = new THREE.Color();
-  positions.forEach(([x, z, sc, rot], i) => {
+  positions.forEach(([x, z, sc, rot, y = 0], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
-    m.compose(new THREE.Vector3(x, trunkY * sc, z), q, new THREE.Vector3(sc, sc, sc));
+    m.compose(new THREE.Vector3(x, y + trunkY * sc - 0.3, z), q, new THREE.Vector3(sc, sc, sc));
     trunks.setMatrixAt(i, m);
     if (kind === 'cactus') {
       const q2 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2 * 0.9);
-      m.compose(new THREE.Vector3(x + Math.cos(rot) * 1.4 * sc, leafY * sc, z + Math.sin(rot) * 1.4 * sc), q.multiply(q2), new THREE.Vector3(sc, sc, sc));
+      m.compose(new THREE.Vector3(x + Math.cos(rot) * 1.4 * sc, y + leafY * sc, z + Math.sin(rot) * 1.4 * sc), q.multiply(q2), new THREE.Vector3(sc, sc, sc));
     } else {
-      m.compose(new THREE.Vector3(x, leafY * sc, z), q, new THREE.Vector3(sc, sc, sc));
+      m.compose(new THREE.Vector3(x, y + leafY * sc, z), q, new THREE.Vector3(sc, sc, sc));
     }
     leaves.setMatrixAt(i, m);
     col.set(leafColor).offsetHSL((Math.sin(i * 12.9898) * 43758.5453 % 1) * 0.03, 0, ((i * 7) % 10) / 10 * 0.12 - 0.06);
@@ -183,12 +186,12 @@ function addBuildings(g, boxes, rand) {
     tex.repeat.set(Math.round(bx.w / 4), Math.round(bx.h / 4));
     const c = new THREE.Color().setHSL(0.55 + bx.hue * 0.2, 0.25, 0.22);
     const mat = new THREE.MeshStandardMaterial({ color: c, map: tex, emissive: 0xffe8b0, emissiveMap: tex, emissiveIntensity: 0.9, roughness: 0.5 });
-    const m = new THREE.Mesh(new THREE.BoxGeometry(bx.w, bx.h, bx.d), mat);
-    m.position.set(bx.x, bx.h / 2, bx.z);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bx.w, bx.h + 4, bx.d), mat);
+    m.position.set(bx.x, (bx.y || 0) + bx.h / 2 - 2, bx.z);
     g.add(m);
     if (rand() > 0.6) {
       const neon = new THREE.Mesh(new THREE.BoxGeometry(bx.w * 0.6, 1.2, 0.4), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: [0xff2d95, 0x00e5ff, 0xb7ff00, 0xff8a00][Math.floor(rand() * 4)], emissiveIntensity: 2 }));
-      neon.position.set(bx.x, bx.h * (0.5 + rand() * 0.4), bx.z + bx.d / 2 + 0.3);
+      neon.position.set(bx.x, (bx.y || 0) + bx.h * (0.5 + rand() * 0.4), bx.z + bx.d / 2 + 0.3);
       g.add(neon);
     }
   }
@@ -204,11 +207,12 @@ function addStreetLights(g, track, highQ) {
     const s = track.samples[i];
     const sd = (Math.floor(i / step) % 2) ? 1 : -1;
     const x = s.p.x + s.n.x * sd * (track.wallOffset + 1.5), z = s.p.z + s.n.z * sd * (track.wallOffset + 1.5);
-    const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(x, 3.5, z); g.add(pole);
-    const lamp = new THREE.Mesh(lampGeo, lampMat); lamp.position.set(x, 7.1, z); g.add(lamp);
+    const y = s.p.y;
+    const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(x, y + 3.5, z); g.add(pole);
+    const lamp = new THREE.Mesh(lampGeo, lampMat); lamp.position.set(x, y + 7.1, z); g.add(lamp);
     if (highQ && (Math.floor(i / step) % 3 === 0)) {
       const pl = new THREE.PointLight(0xffd27a, 40, 45, 2);
-      pl.position.set(x, 6.5, z);
+      pl.position.set(x, y + 6.5, z);
       g.add(pl);
     }
   }
