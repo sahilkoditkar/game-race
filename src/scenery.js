@@ -93,12 +93,15 @@ export function buildScenery(track, quality = 'high') {
 
   // Mountains ring
   const mountainMat = new THREE.MeshStandardMaterial({ color: th.mountains, roughness: 1, flatShading: true });
-  const mCount = 26;
+  // Ring the mountains around the track's bounding circle so long stages never run through them.
+  const boundR = Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2;
+  const mCount = Math.round(26 + boundR / 120);
   for (let i = 0; i < mCount; i++) {
     const a = (i / mCount) * Math.PI * 2 + rand() * 0.2;
-    const r = 1250 + rand() * 350;
+    const coneR = 220 + rand() * 180;
+    const r = boundR + coneR + 350 + rand() * 400;
     const h = 180 + rand() * 260;
-    const m = new THREE.Mesh(new THREE.ConeGeometry(220 + rand() * 180, h, 6 + Math.floor(rand() * 3)), mountainMat);
+    const m = new THREE.Mesh(new THREE.ConeGeometry(coneR, h, 6 + Math.floor(rand() * 3)), mountainMat);
     const base = Math.min(0, track.minHeight) - 25;
     m.position.set(cx + Math.cos(a) * r, base + h / 2, cz + Math.sin(a) * r);
     m.rotation.y = rand() * Math.PI;
