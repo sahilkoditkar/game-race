@@ -8,7 +8,7 @@ export function defaultProfile() {
     upgrades: { hatch: { engine: 0, tires: 0, brakes: 0, aero: 0 } },
     series: {}, stats: { races: 0, wins: 0, podiums: 0, earned: 0 },
     bestLaps: {},
-    settings: { quality: 'high', volume: 0.7, sound: true, p1Scheme: 'wasd', p2Scheme: 'arrows' },
+    settings: { quality: 'high', volume: 0.7, sound: true, p1Control: 'wasd', p2Control: 'arrows' },
   };
 }
 

@@ -29,6 +29,7 @@ export class Car {
     this.vf = 0; // forward speed
     this.vr = 0; // lateral speed (positive = sliding right)
     this.yawRate = 0;
+    this.pitch = 0;         // road pitch under the car (radians, nose-up positive)
     this.latAccel = 0;      // smoothed lateral acceleration (for body roll)
     this.longAccel = 0;     // smoothed longitudinal acceleration (for pitch)
     this.steer = 0;          // smoothed steering [-1,1]
@@ -63,9 +64,10 @@ export class Car {
     this.mesh.userData.car = this;
   }
 
-  place(x, z, heading) {
-    this.pos.set(x, 0.12, z);
+  place(x, z, heading, y = 0) {
+    this.pos.set(x, y + 0.12, z);
     this.heading = heading;
+    this.pitch = 0;
     this.vf = this.vr = 0;
     this.yawRate = 0; this.latAccel = 0; this.longAccel = 0;
     this.vel.set(0, 0, 0);
@@ -95,7 +97,8 @@ export class Car {
     const prevVf = this.vf;
 
     // ---- Longitudinal ----------------------------------------------------
-    const maxS = s.maxSpeed * (this.offroad ? 0.6 : 1);
+    const offroadK = s.offroad ?? 0.6;
+    const maxS = s.maxSpeed * (this.offroad ? offroadK : 1);
     if (inp.throttle > 0) {
       const room = Math.max(0, 1 - this.vf / maxS);
       // strong low-end, tapering toward top speed
@@ -106,14 +109,14 @@ export class Car {
       else this.vf = Math.max(-14, this.vf - s.accel * 0.5 * inp.brake * dt);
     }
     // passive drag & rolling resistance
-    const drag = this.offroad ? 0.9 : 0.035;
+    const drag = this.offroad ? 0.9 * (0.6 / offroadK) : 0.035;
     this.vf -= this.vf * drag * dt + Math.sign(this.vf) * Math.min(Math.abs(this.vf), 1.2 * dt);
     if (this.vf > maxS) this.vf -= (this.vf - maxS) * 2.5 * dt;
     if (inp.handbrake) this.vf -= Math.sign(this.vf) * Math.min(Math.abs(this.vf), 11 * dt);
 
     // ---- Lateral grip ------------------------------------------------------
     // Lateral velocity decays toward zero; the rate is the tyre grip.
-    let grip = s.grip * (this.offroad ? 0.45 : 1);
+    let grip = s.grip * (this.offroad ? 0.45 * (offroadK / 0.6) : 1);
     if (inp.handbrake) grip *= 0.2;
     const slipRatio = Math.abs(this.vr) / (Math.abs(this.vf) + 1);
     if (slipRatio > 0.3) grip *= 0.6; // once sliding, keep sliding a bit
@@ -181,8 +184,14 @@ export class Car {
       }
     }
 
-    // Wrong way detection
+    // Elevation: sit on the road surface, pitch with it, and feel gravity on climbs
     const dot = fx * samp.t.x + fz * samp.t.z;
+    const grade = samp.slope * dot; // positive = climbing in the direction we face
+    this.pos.y = track.heightAtPos(this.pos, this.trackIdx) + 0.12;
+    this.pitch += (-Math.atan(grade) - this.pitch) * Math.min(1, dt * 12);
+    this.vf -= 9.81 * grade * 0.6 * dt;
+
+    // Wrong way detection
     this.wrongWay = this.vf > 3 && dot < -0.3;
 
     // Stuck detection for AI
@@ -202,7 +211,7 @@ export class Car {
 
   updateMesh(dt = 0.016) {
     this.mesh.position.copy(this.pos);
-    this.mesh.rotation.y = this.heading;
+    this.mesh.rotation.set(this.pitch, this.heading, 0, 'YXZ');
     // Body roll/pitch: only the painted shell moves, wheels stay planted.
     // Positive latAccel = turning left (heading increases) -> body leans right.
     const roll = clamp(this.latAccel * 0.0028, -0.06, 0.06);
@@ -304,12 +313,13 @@ export function buildCarMesh(shape, color) {
 
   if (shape === 'formula') {
     // Slim monocoque with raised nose, sidepods, wings and halo.
-    addProfile([[-2.1, 0.32], [-1.9, 0.28], [-0.6, 0.28], [0.3, 0.3], [1.3, 0.34], [2.3, 0.45], [2.4, 0.62], [1.4, 0.72], [0.4, 0.78], [-0.2, 0.95], [-0.9, 0.95], [-1.9, 0.62], [-2.1, 0.5]], 0.85, 0, paint, 0.06);
+    addProfile([[-2.1, 0.12], [-1.9, 0.1], [-0.6, 0.1], [0.3, 0.12], [1.3, 0.2], [2.3, 0.38], [2.4, 0.58], [1.4, 0.7], [0.4, 0.78], [-0.2, 0.95], [-0.9, 0.95], [-1.9, 0.62], [-2.1, 0.4]], 0.85, 0, paint, 0.06);
     addProfile([[-1.0, 0.75], [0.2, 0.75], [0.35, 0.95], [-0.4, 1.02], [-1.0, 0.9]], 0.6, 0, glass, 0.04); // cockpit
-    addProfile([[-1.6, 0.3], [0.6, 0.3], [0.9, 0.45], [0.4, 0.75], [-1.5, 0.75], [-1.7, 0.55]], 0.85, -0.82, paint, 0.06); // sidepods
-    addProfile([[-1.6, 0.3], [0.6, 0.3], [0.9, 0.45], [0.4, 0.75], [-1.5, 0.75], [-1.7, 0.55]], 0.85, 0.82, paint, 0.06);
-    addBox(3.0, 0.05, 0.55, 0, 0.28, 2.5, carbon);                                  // front wing
-    addBox(0.06, 0.2, 0.55, -1.5, 0.38, 2.5, paint); addBox(0.06, 0.2, 0.55, 1.5, 0.38, 2.5, paint);
+    addProfile([[-1.6, 0.1], [0.6, 0.1], [0.9, 0.3], [0.4, 0.72], [-1.5, 0.72], [-1.7, 0.45]], 0.85, -0.82, paint, 0.06); // sidepods
+    addProfile([[-1.6, 0.1], [0.6, 0.1], [0.9, 0.3], [0.4, 0.72], [-1.5, 0.72], [-1.7, 0.45]], 0.85, 0.82, paint, 0.06);
+    addBox(2.6, 0.06, 4.4, 0, 0.07, -0.3, carbon);                                  // floor plank
+    addBox(3.0, 0.05, 0.55, 0, 0.14, 2.5, carbon);                                  // front wing
+    addBox(0.06, 0.24, 0.55, -1.5, 0.26, 2.5, paint); addBox(0.06, 0.24, 0.55, 1.5, 0.26, 2.5, paint);
     addBox(2.3, 0.05, 0.5, 0, 1.05, -2.05, carbon);                                  // rear wing
     addBox(0.05, 0.55, 0.5, -1.15, 0.8, -2.05, paint); addBox(0.05, 0.55, 0.5, 1.15, 0.8, -2.05, paint);
     addBox(0.25, 0.4, 0.9, 0, 1.05, -0.7, paint);                                    // airbox / engine cover
@@ -319,6 +329,75 @@ export function buildCarMesh(shape, color) {
     addWheel(-0.95, 1.55, 0.36, 0.34, true); addWheel(0.95, 1.55, 0.36, 0.34, true);
     addWheel(-0.98, -1.35, 0.40, 0.44); addWheel(0.98, -1.35, 0.40, 0.44);
     addLights(-2.3, 0.88, 0.0, 0xff2020, true, [0.25, 0.25, 0.06]);
+  } else if (shape === 'muscle') {
+    // Long-nose muscle car with a hood scoop and fat rear tyres.
+    addProfile([[-2.3, 0.3], [-2.35, 0.7], [-2.2, 0.98], [-1.2, 1.0], [-0.2, 1.0], [1.2, 0.95], [2.25, 0.8], [2.35, 0.5], [2.25, 0.3]], 1.95, 0, paint, 0.1);
+    addProfile([[-1.4, 0.98], [-1.0, 1.4], [0.1, 1.42], [0.75, 1.0]], 1.6, 0, glass, 0.05);
+    addBox(1.3, 0.05, 0.95, 0, 1.43, -0.5, paint);                                    // roof
+    addBox(0.7, 0.14, 0.9, 0, 1.05, 1.4, paint);                                      // hood scoop
+    addBox(2.0, 0.08, 0.5, 0, 1.05, -2.2, dark);                                       // ducktail spoiler
+    addBox(2.05, 0.16, 0.4, 0, 0.36, 2.3, chrome);                                     // chrome bumper
+    addBox(2.05, 0.16, 0.35, 0, 0.36, -2.3, chrome);
+    addBox(1.2, 0.18, 0.02, 0, 0.72, 2.36, dark);                                      // grille
+    addMirrors(0.7, 1.08, 1.03);
+    addExhaust(-2.4, 0.38, [-0.6, 0.6]);
+    addWheel(-0.9, 1.5, 0.36, 0.3, true); addWheel(0.9, 1.5, 0.36, 0.3, true);
+    addWheel(-0.92, -1.5, 0.38, 0.42); addWheel(0.92, -1.5, 0.38, 0.42);
+    addLights(2.34, 0.72, 0.7, 0xffffff, false, [0.28, 0.28, 0.06]);
+    addLights(-2.38, 0.74, 0.62, 0xff2020, true, [0.5, 0.12, 0.06]);
+  } else if (shape === 'rally') {
+    // Lifted rally hatch with flared arches, roof vent and a big wing.
+    addProfile([[-1.9, 0.38], [-1.95, 0.72], [-1.85, 1.0], [-1.0, 1.05], [0.4, 1.05], [1.5, 0.95], [1.95, 0.72], [1.95, 0.5], [1.85, 0.38]], 1.85, 0, paint, 0.1);
+    addProfile([[-1.75, 1.0], [-1.45, 1.5], [0.1, 1.53], [0.9, 1.08]], 1.55, 0, glass, 0.05);
+    addBox(1.3, 0.05, 1.4, 0, 1.54, -0.65, paint);                                    // roof
+    addBox(0.5, 0.1, 0.5, 0, 1.6, 0.1, dark);                                          // roof vent
+    for (const sx of [-1, 1]) { addBox(0.22, 0.4, 1.1, sx * 0.95, 0.6, 1.25, paint); addBox(0.22, 0.4, 1.1, sx * 0.95, 0.6, -1.25, paint); } // arches
+    addBox(1.7, 0.05, 0.45, 0, 1.35, -1.95, carbon);                                   // wing
+    addBox(0.05, 0.35, 0.4, -0.7, 1.15, -1.95, paint); addBox(0.05, 0.35, 0.4, 0.7, 1.15, -1.95, paint);
+    addBox(1.9, 0.16, 0.4, 0, 0.42, 1.95, dark);
+    addBox(1.9, 0.16, 0.4, 0, 0.42, -1.95, dark);
+    for (const sx of [-0.55, -0.2, 0.2, 0.55]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xfff2b0, emissiveIntensity: 2 })); l.rotation.x = Math.PI / 2; l.position.set(sx, B(0.95), 2.0); body.add(l); } // rally lamps
+    addMirrors(0.75, 1.12, 0.98);
+    addExhaust(-2.0, 0.45, [0.45]);
+    addWheel(-0.9, 1.25, 0.4, 0.34, true); addWheel(0.9, 1.25, 0.4, 0.34, true);
+    addWheel(-0.9, -1.25, 0.4, 0.34); addWheel(0.9, -1.25, 0.4, 0.34);
+    addLights(1.96, 0.8, 0.6, 0xffffff, false, [0.3, 0.12, 0.08]);
+    addLights(-1.97, 0.85, 0.6, 0xff2020, true);
+  } else if (shape === 'super' || shape === 'hyper') {
+    // Mid-engine wedge. The hyper variant gets a swan-neck wing and diffuser.
+    addProfile([[-2.2, 0.25], [-2.25, 0.55], [-2.05, 0.78], [-1.2, 0.85], [-0.3, 0.9], [0.9, 0.82], [2.1, 0.6], [2.25, 0.42], [2.15, 0.25]], 1.98, 0, paint, 0.1);
+    addProfile([[-1.3, 0.85], [-0.9, 1.15], [0.2, 1.18], [1.0, 0.85]], 1.4, 0, glass, 0.05);
+    addBox(0.9, 0.05, 0.7, 0, 1.19, -0.35, paint);                                     // roof
+    addBox(1.4, 0.2, 1.1, 0, 0.9, -1.4, carbon);                                       // engine cover
+    for (const sx of [-1, 1]) addBox(0.35, 0.3, 0.9, sx * 0.85, 0.85, -0.2, dark);      // side intakes
+    addBox(2.05, 0.08, 0.5, 0, 0.24, 2.3, carbon);                                     // splitter
+    addBox(2.0, 0.12, 0.4, 0, 0.3, -2.25, carbon);                                     // diffuser
+    if (shape === 'hyper') {
+      addBox(1.9, 0.05, 0.5, 0, 1.3, -2.0, carbon);
+      addBox(0.06, 0.4, 0.5, -0.5, 1.1, -2.0, paint); addBox(0.06, 0.4, 0.5, 0.5, 1.1, -2.0, paint);
+      addBox(0.25, 0.4, 1.3, 0, 1.0, -1.0, paint);                                    // shark fin
+    } else {
+      addBox(1.7, 0.05, 0.35, 0, 0.95, -2.15, carbon);
+    }
+    addMirrors(0.6, 0.95, 1.05);
+    addExhaust(-2.3, 0.45, [-0.35, 0.35]);
+    addWheel(-0.92, 1.45, 0.36, 0.32, true); addWheel(0.92, 1.45, 0.36, 0.32, true);
+    addWheel(-0.94, -1.45, 0.38, 0.4); addWheel(0.94, -1.45, 0.38, 0.4);
+    addLights(2.24, 0.6, 0.7, 0xffffff, false, [0.4, 0.08, 0.08]);
+    addLights(-2.28, 0.62, 0.7, 0xff2020, true, [0.5, 0.08, 0.06]);
+  } else if (shape === 'classic') {
+    // Vintage roadster: rounded, open top, upright chrome grille.
+    addProfile([[-1.8, 0.35], [-1.9, 0.6], [-1.75, 0.95], [-1.0, 1.05], [-0.4, 1.05], [0.4, 1.0], [1.5, 0.98], [1.85, 0.8], [1.9, 0.55], [1.75, 0.35]], 1.65, 0, paint, 0.16);
+    addBox(1.4, 0.35, 0.06, 0, 1.22, 0.35, glass);                                     // windscreen
+    addBox(1.3, 0.12, 0.9, 0, 1.06, -0.45, dark);                                      // cockpit opening (seats)
+    addBox(0.9, 0.5, 0.12, 0, 0.75, 1.92, chrome);                                     // grille
+    for (const sx of [-1, 1]) { const hl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d0, emissiveIntensity: 1.5 })); hl.position.set(sx * 0.65, B(0.85), 1.9); body.add(hl); }
+    addBox(1.75, 0.12, 0.3, 0, 0.42, 1.95, chrome); addBox(1.75, 0.12, 0.3, 0, 0.42, -1.9, chrome);
+    for (const sx of [-1, 1]) addBox(0.3, 0.06, 1.1, sx * 0.95, 0.88, 1.15, paint);    // front fenders
+    addExhaust(-1.95, 0.4, [0.5]);
+    addWheel(-0.8, 1.2, 0.38, 0.22, true); addWheel(0.8, 1.2, 0.38, 0.22, true);
+    addWheel(-0.8, -1.15, 0.38, 0.22); addWheel(0.8, -1.15, 0.38, 0.22);
+    addLights(-1.93, 0.72, 0.55, 0xff2020, true, [0.18, 0.18, 0.06]);
   } else if (shape === 'proto') {
     // Low, wide endurance prototype with canopy, fin and big wing.
     addProfile([[-2.3, 0.25], [-2.35, 0.55], [-1.6, 0.7], [-0.6, 0.72], [0.3, 0.75], [1.3, 0.72], [2.25, 0.6], [2.35, 0.4], [2.2, 0.25]], 2.0, 0, paint, 0.1);

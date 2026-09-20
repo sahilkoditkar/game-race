@@ -125,7 +125,10 @@ export class Race {
     const k = f - i;
     const a = g.samples[i], b = g.samples[j];
     this.ghost.visible = t < g.lapTime + 0.5;
-    this.ghost.position.set(a[0] + (b[0] - a[0]) * k, 0.12, a[1] + (b[1] - a[1]) * k);
+    const gx = a[0] + (b[0] - a[0]) * k, gz = a[1] + (b[1] - a[1]) * k;
+    this.tmp.set(gx, 0, gz);
+    this.ghostIdx = this.track.nearestIndex(this.tmp, this.ghostIdx ?? null);
+    this.ghost.position.set(gx, this.track.heightAtPos(this.tmp, this.ghostIdx) + 0.12, gz);
     let dh = b[2] - a[2];
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
@@ -151,7 +154,7 @@ export class Race {
     // Players start at the back of the grid.
     grid.forEach((car, slot) => {
       const g = this.track.gridSlot(slot);
-      car.place(g.x, g.z, g.heading);
+      car.place(g.x, g.z, g.heading, g.y);
       car.trackIdx = g.idx;
       car.lap = 0; car.nextSector = this.track.sectorCount; // waiting to cross the line
       car.progress = -(this.track.count - g.idx);
@@ -215,7 +218,7 @@ export class Race {
     const dist = 7.5 + speedF * 2.5;
     const height = 3.0 + speedF * 0.7;
     const fx = Math.sin(h), fz = Math.cos(h);
-    cam.position.set(car.pos.x - fx * dist, height, car.pos.z - fz * dist);
+    cam.position.set(car.pos.x - fx * dist, car.pos.y + height, car.pos.z - fz * dist);
     if (cam.userData.shake > 0.01) {
       cam.position.x += (Math.random() - 0.5) * cam.userData.shake;
       cam.position.y += (Math.random() - 0.5) * cam.userData.shake * 0.6;
@@ -231,7 +234,7 @@ export class Race {
   /** Move a player car back onto the track facing the right way. */
   resetCar(car) {
     const s = this.track.samples[car.trackIdx];
-    car.place(s.p.x, s.p.z, s.heading);
+    car.place(s.p.x, s.p.z, s.heading, s.p.y);
     car.wrongWay = false;
   }
 

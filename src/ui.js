@@ -1,6 +1,6 @@
 import { TRACKS, getTrack } from './tracks.js';
 import { CARS, SERIES, UPGRADES, PLAYER_COLORS, getCar, getSeries, upgradeCost, effectiveStats } from './data.js';
-import { SCHEMES } from './input.js';
+import { CONTROLS, getControl, padConnected } from './input.js';
 import { seriesState, isSeriesUnlocked, standings, canBuyUpgrade } from './career.js';
 import { fmtTime } from './race.js';
 
@@ -48,7 +48,11 @@ export class UI {
           <button data-go="timetrial">Time Trial <span class="hint">Beat your best laps</span></button>
           <button data-go="settings">Settings &amp; Controls</button>
         </div>
-        <div class="footer-note">P1: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> + <kbd>Shift</kbd> handbrake · P2: <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> + <kbd>R-Shift</kbd> · Gamepads supported · <kbd>Esc</kbd> pause</div>
+        <div class="footer-note">
+          <div class="keys-row"><span>Player 1</span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>steer</span><kbd>Shift</kbd><span>drift</span></div>
+          <div class="keys-row"><span>Player 2</span><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd><span>steer</span><kbd>R-Shift</kbd><span>drift</span></div>
+          <div class="keys-row"><span>Any</span><kbd>Esc</kbd><span>pause</span><kbd>R</kbd><span>reset</span><span>· gamepads and touch supported</span></div>
+        </div>
       </div>`);
     this.on('[data-go]', 'click', (e, el) => {
       const go = el.dataset.go;
@@ -65,8 +69,8 @@ export class UI {
     const st = app.setup = app.setup || {
       trackId: 'sunrise', laps: 3, aiCount: 5, difficulty: 1,
       players: [
-        { name: 'Player 1', carId: 'hatch', colorIndex: 0, scheme: p.settings.p1Scheme, pad: 0 },
-        { name: 'Player 2', carId: 'gt', colorIndex: 1, scheme: p.settings.p2Scheme, pad: 1 },
+        { name: 'Player 1', carId: 'hatch', colorIndex: 0, control: p.settings.p1Control || 'wasd' },
+        { name: 'Player 2', carId: 'gt', colorIndex: 1, control: p.settings.p2Control || 'arrows' },
       ],
     };
     st.mode = mode;
@@ -77,12 +81,8 @@ export class UI {
       this.show(`
         <div class="panel">
           <div class="row between"><h2>${title}</h2><button class="small ghost" data-back>← Back</button></div>
-          <h3>Track</h3>
-          <div class="grid-3">
-            ${TRACKS.map(t => `<div class="card ${t.id === st.trackId ? 'selected' : ''}" data-track="${t.id}" style="cursor:pointer">
-              <h4>${t.name}</h4><div class="meta">${t.desc}</div>
-              <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}${t.real ? ' · <span class="badge">real circuit</span>' : ''}</div></div>`).join('')}
-          </div>
+          ${this._trackSection('Real-world circuits', 'Layouts inspired by famous tracks, with their elevation changes', TRACKS.filter(t => t.kind === 'real'), st.trackId)}
+          ${this._trackSection('Original circuits', 'Fictional tracks designed for this game', TRACKS.filter(t => t.kind !== 'real'), st.trackId)}
           <div class="grid-2" style="margin-top:16px">
             <div class="field"><label>Laps: <b id="lapsv">${st.laps}</b></label><input type="range" min="1" max="10" value="${st.laps}" data-field="laps"></div>
             ${mode !== 'timetrial' ? `
@@ -94,8 +94,9 @@ export class UI {
           <div class="grid-2">
             ${st.players.slice(0, nPlayers).map((pl, i) => `
               <div class="card">
-                <h4>${nPlayers > 1 ? `Player ${i + 1}` : 'Your car'} <span class="badge">${SCHEMES[pl.scheme].name}${pl.pad >= 0 ? ' / Gamepad ' + (pl.pad + 1) : ''}</span></h4>
+                <h4>${nPlayers > 1 ? `Player ${i + 1}` : 'Your car'}</h4>
                 <div class="field"><label>Name</label><input type="text" maxlength="14" value="${pl.name}" data-name="${i}"></div>
+                <div class="field"><label>Controls</label>${this._controlChips(pl.control, `data-control="${i}"`, i)}</div>
                 <div class="field"><label>Car</label><select data-car="${i}">${CARS.map(c => `<option value="${c.id}" ${c.id === pl.carId ? 'selected' : ''}>${c.name}</option>`).join('')}</select></div>
                 ${this._statBars(effectiveStats(getCar(pl.carId), { engine: 2, tires: 2, brakes: 2, aero: 2 }))}
                 <div class="field"><label>Colour</label><div class="chips">${PLAYER_COLORS.map((c, ci) => `<div class="swatch ${pl.colorIndex === ci ? 'active' : ''}" data-color="${i}:${ci}" style="background:${hex(c)}"></div>`).join('')}</div></div>
@@ -109,10 +110,36 @@ export class UI {
       this.on('[data-diff]', 'click', (e, el) => { st.difficulty = parseInt(el.dataset.diff, 10); render(); });
       this.on('[data-name]', 'input', (e, el) => { st.players[+el.dataset.name].name = el.value.trim() || `Player ${+el.dataset.name + 1}`; });
       this.on('[data-car]', 'change', (e, el) => { st.players[+el.dataset.car].carId = el.value; render(); });
+      this.on('[data-control]', 'click', (e, el) => {
+        if (el.classList.contains('disabled')) return;
+        const i = +el.dataset.control, id = el.dataset.id;
+        const other = st.players[1 - i];
+        if (other && other.control === id && nPlayers > 1) other.control = st.players[i].control; // swap
+        st.players[i].control = id;
+        p.settings[i === 0 ? 'p1Control' : 'p2Control'] = id; app.save();
+        render();
+      });
       this.on('[data-color]', 'click', (e, el) => { const [i, ci] = el.dataset.color.split(':').map(Number); st.players[i].colorIndex = ci; render(); });
       this.on('[data-start]', 'click', () => app.startQuickRace(mode));
     };
     render();
+  }
+
+  _trackSection(title, sub, tracks, selectedId) {
+    return `<h3>${title} <span class="meta" style="text-transform:none;letter-spacing:0;font-weight:400">· ${sub}</span></h3>
+      <div class="grid-3">
+        ${tracks.map(t => `<div class="card ${t.id === selectedId ? 'selected' : ''}" data-track="${t.id}" style="cursor:pointer">
+          <h4>${t.name}</h4><div class="meta">${t.desc}</div>
+          <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}${t.kind === 'real' ? ' · <span class="badge">real</span>' : ' · <span class="badge" style="opacity:.7">original</span>'}</div></div>`).join('')}
+      </div>`;
+  }
+
+  _controlChips(current, attr, playerIndex = 0) {
+    const touch = this.app.input.isTouchDevice;
+    return `<div class="chips">${CONTROLS.filter(c => !c.touchOnly || (touch && playerIndex === 0)).map(c => {
+      const pad = c.pad >= 0 ? (padConnected(c.pad) ? ' <span class="badge done">connected</span>' : ' <span class="badge" style="opacity:.6">not detected</span>') : '';
+      return `<div class="chip ${current === c.id ? 'active' : ''}" ${attr} data-id="${c.id}" title="${c.keys}">${c.name}${pad}</div>`;
+    }).join('')}</div>`;
   }
 
   _bestLapLine(trackId) {
@@ -142,6 +169,7 @@ export class UI {
           <button data-garage>🔧 Garage <span class="hint">Buy cars &amp; upgrades</span></button>
           <button data-back class="ghost">← Main menu</button>
         </div>
+        <div class="field"><label>Your controls</label>${this._controlChips(p.settings.p1Control || 'wasd', 'data-ctl="1"', 0)}</div>
         <h3>Championships</h3>
         <div class="menu">
           ${SERIES.map(s => {
@@ -172,6 +200,7 @@ export class UI {
       </div>`);
     this.on('[data-back]', 'click', () => this.mainMenu());
     this.on('[data-garage]', 'click', () => this.garage());
+    this.on('[data-ctl]', 'click', (e, el) => { p.settings.p1Control = el.dataset.id; app.save(); this.career(); });
     this.on('[data-race]', 'click', (e, el) => app.startCareerRace(el.dataset.race));
     this.on('[data-restart]', 'click', (e, el) => { if (confirm('Replay this series from round 1? Standings will be reset (your credits and cars are kept).')) { app.restartSeries(el.dataset.restart); this.career(); } });
     this.on('[data-standings]', 'click', (e, el) => {
@@ -242,8 +271,8 @@ export class UI {
             <div class="field"><label>Sound: ${s.sound ? 'on' : 'off'}</label><div class="chips">
               <div class="chip ${s.sound ? 'active' : ''}" data-sound="1">On</div><div class="chip ${!s.sound ? 'active' : ''}" data-sound="0">Off</div></div></div>
             <div class="field"><label>Volume</label><input type="range" min="0" max="1" step="0.05" value="${s.volume}" data-vol></div>
-            <div class="field"><label>Player 1 keys</label><select data-scheme="p1Scheme">${Object.entries(SCHEMES).map(([k, v]) => `<option value="${k}" ${s.p1Scheme === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></div>
-            <div class="field"><label>Player 2 keys</label><select data-scheme="p2Scheme">${Object.entries(SCHEMES).map(([k, v]) => `<option value="${k}" ${s.p2Scheme === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></div>
+            <div class="field"><label>Player 1 controls (default)</label>${this._controlChips(s.p1Control || 'wasd', 'data-ctl="p1Control"', 0)}</div>
+            <div class="field"><label>Player 2 controls (default)</label>${this._controlChips(s.p2Control || 'arrows', 'data-ctl="p2Control"', 1)}</div>
             <button class="small" data-fullscreen>Toggle fullscreen</button>
           </div>
           <div>
@@ -266,7 +295,7 @@ export class UI {
     this.on('[data-q]', 'click', (e, el) => { s.quality = el.dataset.q; app.save(); this.settings(); });
     this.on('[data-sound]', 'click', (e, el) => { s.sound = el.dataset.sound === '1'; app.audio.setEnabled(s.sound); app.save(); this.settings(); });
     this.on('[data-vol]', 'input', (e, el) => { s.volume = parseFloat(el.value); app.audio.setVolume(s.volume); app.save(); });
-    this.on('[data-scheme]', 'change', (e, el) => { s[el.dataset.scheme] = el.value; if (app.setup) { app.setup.players[0].scheme = s.p1Scheme; app.setup.players[1].scheme = s.p2Scheme; } app.save(); });
+    this.on('[data-ctl]', 'click', (e, el) => { s[el.dataset.ctl] = el.dataset.id; if (app.setup) { app.setup.players[0].control = s.p1Control; app.setup.players[1].control = s.p2Control; } app.save(); this.settings(); });
     this.on('[data-fullscreen]', 'click', () => app.toggleFullscreen());
     this.on('[data-reset]', 'click', () => { if (confirm('Delete all career progress, cars and best laps?')) { app.resetProfile(); this.toast('Progress reset'); this.settings(); } });
   }

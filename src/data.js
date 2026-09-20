@@ -2,10 +2,22 @@
 
 export const CARS = [
   {
+    id: 'classic', name: 'Retro 62 Roadster', price: 3500,
+    desc: 'A vintage open-top roadster. Slow but sweet-handling, and cheap.',
+    stats: { maxSpeed: 50, accel: 13, grip: 6.6, turn: 1.08, brake: 32 },
+    shape: 'classic',
+  },
+  {
     id: 'hatch', name: 'Vento Hatch', price: 0,
     desc: 'Nimble front-wheel-drive hatch. Forgiving and cheap to upgrade.',
     stats: { maxSpeed: 58, accel: 16, grip: 6.8, turn: 1.0, brake: 36 },
     shape: 'hatch',
+  },
+  {
+    id: 'muscle', name: 'Thunder V8', price: 9000,
+    desc: 'Big American muscle. Monster straight-line speed, needs respect in the corners.',
+    stats: { maxSpeed: 68, accel: 21, grip: 6.4, turn: 0.96, brake: 36 },
+    shape: 'muscle',
   },
   {
     id: 'gt', name: 'Strada GT', price: 14000,
@@ -14,10 +26,28 @@ export const CARS = [
     shape: 'gt',
   },
   {
+    id: 'rally', name: 'Gravel King', price: 19000,
+    desc: 'All-wheel-drive rally weapon. Barely slows down on grass and gravel.',
+    stats: { maxSpeed: 66, accel: 22, grip: 8.0, turn: 1.08, brake: 40, offroad: 0.88 },
+    shape: 'rally',
+  },
+  {
+    id: 'super', name: 'Vortex S9', price: 26000,
+    desc: 'Mid-engine supercar. Sharp, balanced, and very fast.',
+    stats: { maxSpeed: 76, accel: 24, grip: 8.4, turn: 1.08, brake: 44 },
+    shape: 'super',
+  },
+  {
     id: 'proto', name: 'Nightfall LMP', price: 32000,
     desc: 'Endurance prototype with massive downforce and a giant rear wing.',
     stats: { maxSpeed: 78, accel: 23, grip: 8.8, turn: 1.1, brake: 46 },
     shape: 'proto',
+  },
+  {
+    id: 'hyper', name: 'Halo Hypercar', price: 48000,
+    desc: 'Active aero and a hybrid punch. The fastest thing with number plates.',
+    stats: { maxSpeed: 86, accel: 27, grip: 9.2, turn: 1.12, brake: 48 },
+    shape: 'hyper',
   },
   {
     id: 'formula', name: 'Apex F1', price: 60000,
@@ -49,6 +79,7 @@ export function effectiveStats(car, levels = {}) {
     grip: s.grip * (1 + 0.06 * t + 0.02 * a),
     turn: s.turn * (1 + 0.035 * a),
     brake: s.brake * (1 + 0.08 * b),
+    offroad: s.offroad,
   };
 }
 
