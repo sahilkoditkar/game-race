@@ -23,7 +23,7 @@ export function buildScenery(track, quality = 'high') {
   const groundTex = makeGroundTexture(th);
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
   const terrainSize = extent + 1100;
-  const cellsN = Math.min(260, Math.round(terrainSize / (highQ ? 9 : 14)));
+  const cellsN = Math.min(highQ ? 420 : 300, Math.round(terrainSize / (highQ ? 9 : 14)));
   groundTex.repeat.set(terrainSize / 40, terrainSize / 40);
   const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, cellsN, cellsN);
   terrainGeo.rotateX(-Math.PI / 2);
@@ -59,7 +59,8 @@ export function buildScenery(track, quality = 'high') {
 
   // Trees / cacti / pines
   if (th.trees !== 'none') {
-    const count = highQ ? 420 : 160;
+    const area = (extent + 500) * (extent + 500) / (1500 * 1500);
+    const count = Math.round(Math.min(1600, Math.max(200, (highQ ? 420 : 160) * area)));
     const positions = [];
     let tries = 0;
     while (positions.length < count && tries < count * 20) {
@@ -77,7 +78,7 @@ export function buildScenery(track, quality = 'high') {
   if (th.buildings) {
     const boxes = [];
     let tries = 0;
-    while (boxes.length < (highQ ? 140 : 60) && tries < 3000) {
+    while (boxes.length < Math.round(Math.min(400, (highQ ? 140 : 60) * Math.max(1, (extent + 500) * (extent + 500) / (1500 * 1500)))) && tries < 6000) {
       tries++;
       const x = cx + (rand() - 0.5) * (extent + 420);
       const z = cz + (rand() - 0.5) * (extent + 420);

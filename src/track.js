@@ -11,10 +11,26 @@ function catmullRom(p0, p1, p2, p3, t) {
   ];
 }
 
-/** Sample a closed Catmull-Rom spline into uniformly spaced 2D points. */
-export function sampleSpline(points, spacing = SPACING) {
+/** Sample a Catmull-Rom spline (closed loop, or open point-to-point) into uniformly spaced 2D points. */
+export function sampleSpline(points, spacing = SPACING, open = false) {
   const n = points.length;
   const raw = [];
+  if (open) {
+    const g = (i) => points[Math.max(0, Math.min(n - 1, i))];
+    for (let i = 0; i < n - 1; i++) for (let k = 0; k < 24; k++) raw.push(catmullRom(g(i - 1), g(i), g(i + 1), g(i + 2), k / 24));
+    raw.push(points[n - 1]);
+    const out = [raw[0]];
+    let carry = 0;
+    for (let i = 0; i < raw.length - 1; i++) {
+      const a = raw[i], b = raw[i + 1];
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      const segLen = Math.hypot(dx, dz);
+      let t = spacing - carry;
+      while (t <= segLen) { out.push([a[0] + dx * (t / segLen), a[1] + dz * (t / segLen)]); t += spacing; }
+      carry = segLen - (t - spacing);
+    }
+    return out;
+  }
   for (let i = 0; i < n; i++) {
     const p0 = points[(i - 1 + n) % n], p1 = points[i], p2 = points[(i + 1) % n], p3 = points[(i + 2) % n];
     for (let k = 0; k < 24; k++) raw.push(catmullRom(p0, p1, p2, p3, k / 24));
@@ -51,6 +67,7 @@ export class Track {
     this.spacing = SPACING;
     this.group = new THREE.Group();
     this.quality = quality;
+    this.open = !!def.open; // point-to-point stage instead of a loop
     this._buildSamples();
     this.seaLevel = Math.min(0, this.minHeight) - 6;
     if (this.theme.water !== null) this.coastZ = this.bounds.maxZ + 50;
@@ -59,14 +76,21 @@ export class Track {
     this.sectorSize = Math.ceil(this.samples.length / this.sectorCount);
   }
 
+  /** Index wrap for loops, clamp for open stages. */
+  wrap(i) { const N = this.samples.length; return this.open ? Math.max(0, Math.min(N - 1, i)) : ((i % N) + N) % N; }
+
   _buildSamples() {
-    const pts = sampleSpline(this.def.points, SPACING);
+    const pts = sampleSpline(this.def.points, SPACING, this.open);
     const N = pts.length;
+    const W = (i) => this.open ? Math.max(0, Math.min(N - 1, i)) : ((i % N) + N) % N;
+    // Stages: the start line sits after a run-up straight and the finish line before a run-off.
+    this.startIdx = this.open ? Math.min(80, Math.floor(N * 0.1)) : 0;
+    this.finishIdx = this.open ? N - Math.min(100, Math.floor(N * 0.1)) : 0;
     const heights = this._elevationProfile(N);
     const widths = this._widthProfile(N);
     this.samples = [];
     for (let i = 0; i < N; i++) {
-      const prev = pts[(i - 1 + N) % N], next = pts[(i + 1) % N];
+      const prev = pts[W(i - 1)], next = pts[W(i + 1)];
       let tx = next[0] - prev[0], tz = next[1] - prev[1];
       const l = Math.hypot(tx, tz) || 1;
       tx /= l; tz /= l;
@@ -75,7 +99,7 @@ export class Track {
         t: new THREE.Vector3(tx, 0, tz),
         n: new THREE.Vector3(tz, 0, -tx), // left-hand normal
         curv: 0,
-        slope: (heights[(i + 1) % N] - heights[(i - 1 + N) % N]) / (2 * SPACING),
+        slope: (heights[W(i + 1)] - heights[W(i - 1)]) / ((W(i + 1) - W(i - 1)) * SPACING || SPACING),
         heading: Math.atan2(tx, tz),
         hw: (this.def.width / 2) * widths[i],
         wall: (this.def.width / 2) * widths[i] + 3.2,
@@ -88,7 +112,7 @@ export class Track {
     this._buildGrid();
     // signed curvature via heading change
     for (let i = 0; i < N; i++) {
-      const a = this.samples[(i - 2 + N) % N].heading, b = this.samples[(i + 2) % N].heading;
+      const a = this.samples[W(i - 2)].heading, b = this.samples[W(i + 2)].heading;
       let d = b - a;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
@@ -118,7 +142,7 @@ export class Track {
       const t = (i / N) * Math.PI * 2;
       let w = 1 + 0.10 * Math.sin(a1 * t + p1) + 0.06 * Math.sin(a2 * t + p2) + 0.03 * Math.sin(a3 * t + p3);
       // the start straight stays at the nominal width so the grid always fits
-      const dStart = Math.min(i, N - i) / N;
+      const dStart = (this.open ? Math.min(Math.max(0, i - 40), Math.max(0, N - 1 - i)) : Math.min(i, N - i)) / N;
       const k = Math.min(1, dStart / 0.04);
       out[i] = 1 + (w - 1) * k;
     }
@@ -141,14 +165,17 @@ export class Track {
     keys = [...keys].sort((a, b) => a[0] - b[0]);
     const M = keys.length;
     const out = new Float32Array(N);
+    const open = this.open;
+    const K = (j) => open ? keys[Math.max(0, Math.min(M - 1, j))] : keys[((j % M) + M) % M];
     for (let i = 0; i < N; i++) {
-      const t = i / N;
+      const t = open ? i / (N - 1) : i / N;
       // find segment
       let k = 0;
       while (k < M - 1 && keys[k + 1][0] <= t) k++;
+      if (open && k >= M - 1) { out[i] = keys[M - 1][1]; continue; }
       const t0 = keys[k][0], t1 = k + 1 < M ? keys[k + 1][0] : keys[0][0] + 1;
       const u = (t - t0) / Math.max(1e-6, t1 - t0);
-      const p0 = keys[(k - 1 + M) % M][1], p1 = keys[k][1], p2 = keys[(k + 1) % M][1], p3 = keys[(k + 2) % M][1];
+      const p0 = K(k - 1)[1], p1 = K(k)[1], p2 = K(k + 1)[1], p3 = K(k + 2)[1];
       const u2 = u * u, u3 = u2 * u;
       out[i] = 0.5 * ((2 * p1) + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
     }
@@ -156,9 +183,11 @@ export class Track {
     // Smoothing always runs last: the clamp creates kinks, and kinks feel like
     // bumps at speed.
     const maxStep = SPACING * 0.14;
+    const WI = (i) => open ? Math.max(0, Math.min(N - 1, i)) : ((i % N) + N) % N;
     const clampGrade = () => {
-      for (let i = 0; i < N * 2; i++) {
-        const a = i % N, b = (i + 1) % N;
+      const passes = open ? N - 1 : N * 2;
+      for (let i = 0; i < passes; i++) {
+        const a = WI(i), b = WI(i + 1);
         const d = out[b] - out[a];
         if (d > maxStep) out[b] = out[a] + maxStep;
         else if (d < -maxStep) out[b] = out[a] - maxStep;
@@ -169,13 +198,13 @@ export class Track {
       const w = half * 2 + 1;
       for (let i = 0; i < N; i++) {
         let acc = 0;
-        for (let k = -half; k <= half; k++) acc += copy[(i + k + N) % N];
+        for (let k = -half; k <= half; k++) acc += copy[WI(i + k)];
         out[i] = acc / w;
       }
     };
     clampGrade(); smooth(10); clampGrade(); smooth(8); smooth(6); smooth(4);
-    // make the start/finish line sit exactly at height 0 and blend the loop closure
-    const off = out[0];
+    // make the start line sit exactly at height 0
+    const off = out[this.startIdx || 0];
     for (let i = 0; i < N; i++) out[i] -= off;
     return out;
   }
@@ -216,9 +245,9 @@ export class Track {
     let f = Math.max(-1, Math.min(1, this._param(pos, idx)));
     // Catmull-Rom through the four surrounding samples so the height is C1-continuous
     let i1 = idx, u = f;
-    if (f < 0) { i1 = (idx - 1 + N) % N; u = f + 1; }
-    const h0 = this.samples[(i1 - 1 + N) % N].p.y, h1 = this.samples[i1].p.y;
-    const h2 = this.samples[(i1 + 1) % N].p.y, h3 = this.samples[(i1 + 2) % N].p.y;
+    if (f < 0) { i1 = this.wrap(idx - 1); u = f + 1; }
+    const h0 = this.samples[this.wrap(i1 - 1)].p.y, h1 = this.samples[i1].p.y;
+    const h2 = this.samples[this.wrap(i1 + 1)].p.y, h3 = this.samples[this.wrap(i1 + 2)].p.y;
     const u2 = u * u, u3 = u2 * u;
     return 0.5 * ((2 * h1) + (-h0 + h2) * u + (2 * h0 - 5 * h1 + 4 * h2 - h3) * u2 + (-h0 + 3 * h1 - 3 * h2 + h3) * u3);
   }
@@ -228,7 +257,7 @@ export class Track {
     const N = this.samples.length;
     const s = this.samples[idx];
     const f = Math.max(-1, Math.min(1, this._param(pos, idx)));
-    const j = f >= 0 ? (idx + 1) % N : (idx - 1 + N) % N;
+    const j = f >= 0 ? this.wrap(idx + 1) : this.wrap(idx - 1);
     const w = Math.abs(f);
     return s.slope * (1 - w) + this.samples[j].slope * w;
   }
@@ -271,7 +300,8 @@ export class Track {
       return best;
     }
     for (let k = -window; k <= window; k++) {
-      const i = (hint + k + N * 4) % N;
+      const i = this.open ? hint + k : (hint + k + N * 4) % N;
+      if (i < 0 || i >= N) continue;
       const s = this.samples[i];
       const dx = s.p.x - pos.x, dz = s.p.z - pos.z;
       const d = dx * dx + dz * dz;
@@ -307,7 +337,7 @@ export class Track {
     return idx + Math.max(-0.5, Math.min(0.5, this._param(pos, idx)));
   }
 
-  sample(i) { const N = this.samples.length; return this.samples[((i % N) + N) % N]; }
+  sample(i) { return this.samples[this.wrap(i)]; }
 
   /** Max absolute curvature in the next `metres`. */
   maxCurvatureAhead(idx, metres) {
@@ -323,7 +353,7 @@ export class Track {
   gridSlot(slot) {
     const row = Math.floor(slot / 2), side = slot % 2 === 0 ? 1 : -1;
     const back = 6 + row * 7 + (slot % 2) * 3.5;
-    const idx = ((-Math.round(back / SPACING)) % this.count + this.count) % this.count;
+    const idx = this.wrap(this.startIdx - Math.round(back / SPACING));
     const s = this.samples[idx];
     const lateral = side * s.hw * 0.42;
     return {
@@ -378,7 +408,7 @@ export class Track {
     }
 
     // Start / finish line
-    const s0 = this.samples[0];
+    const s0 = this.samples[this.startIdx];
     const lineGeo = new THREE.PlaneGeometry(s0.hw * 2, 3);
     const lineTex = makeCheckerTexture();
     lineTex.repeat.set(8, 2); lineTex.wrapS = lineTex.wrapT = THREE.RepeatWrapping;
@@ -413,6 +443,30 @@ export class Track {
     gantry.position.set(s0.p.x, s0.p.y, s0.p.z);
     gantry.rotation.y = s0.heading;
     this.group.add(gantry);
+
+    if (this.open) {
+      // Finish line and gantry
+      const sf = this.samples[this.finishIdx];
+      const fpivot = new THREE.Group();
+      fpivot.position.set(sf.p.x, sf.p.y + 0.04, sf.p.z);
+      fpivot.rotation.y = sf.heading;
+      const fline = new THREE.Mesh(new THREE.PlaneGeometry(sf.hw * 2, 3), new THREE.MeshStandardMaterial({ map: lineTex, roughness: 0.9 }));
+      fline.rotation.set(-Math.PI / 2, 0, 0); fline.position.y = 0.14;
+      fpivot.add(fline);
+      const fg = new THREE.Group();
+      for (const sd of [1, -1]) { const post = new THREE.Mesh(postGeo, postMat); post.position.set(sd * (sf.wall + 1.2), 3.5, 0); fg.add(post); }
+      const fbeam = new THREE.Mesh(new THREE.BoxGeometry(sf.wall * 2 + 3, 1.6, 1), new THREE.MeshStandardMaterial({ map: makeBannerTexture('FINISH', th), roughness: 0.6 }));
+      fbeam.position.set(0, 6.4, 0); fg.add(fbeam);
+      fg.rotation.y = sf.heading; fg.position.set(sf.p.x, sf.p.y, sf.p.z);
+      this.group.add(fpivot, fg);
+      // Barriers across both ends of the stage
+      for (const i of [0, N - 1]) {
+        const s = this.samples[i];
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(s.wall * 2 + 1, 1.4, 0.6), new THREE.MeshStandardMaterial({ vertexColors: false, color: 0xe53935, roughness: 0.6 }));
+        bar.position.set(s.p.x, s.p.y + 0.7, s.p.z); bar.rotation.y = s.heading;
+        this.group.add(bar);
+      }
+    }
   }
 
   setStartLights(count, go) {
@@ -441,7 +495,7 @@ export class Track {
       if (col) { c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6); }
     }
     const idx = [];
-    for (let i = 0; i < N; i++) {
+    for (let i = 0; i < (this.open ? N - 1 : N); i++) {
       const j = (i + 1) % N;
       const a0 = i * 2, b0 = i * 2 + 1, a1 = j * 2, b1 = j * 2 + 1;
       idx.push(a0, b0, a1, b0, b1, a1);
@@ -469,7 +523,7 @@ export class Track {
       uv.set([i / N, 0, i / N, 1], i * 4);
     }
     const idx = [];
-    for (let i = 0; i < N; i++) {
+    for (let i = 0; i < (this.open ? N - 1 : N); i++) {
       const j = (i + 1) % N;
       idx.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1);
     }

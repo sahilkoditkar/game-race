@@ -181,8 +181,8 @@ export class Race {
       const g = this.track.gridSlot(slot);
       car.place(g.x, g.z, g.heading, g.y);
       car.trackIdx = g.idx;
-      car.lap = 0; car.nextSector = this.track.sectorCount; // waiting to cross the line
-      car.progress = -(this.track.count - g.idx);
+      if (this.track.open) { car.lap = 1; car.nextSector = 1; car.progress = g.idx; }
+      else { car.lap = 0; car.nextSector = this.track.sectorCount; car.progress = -(this.track.count - g.idx); } // waiting to cross the line
       this.scene.add(car.mesh);
       this.cars.push(car);
     });
@@ -281,7 +281,11 @@ export class Race {
       if (n !== this.lastCount) {
         this.lastCount = n;
         if (n >= 1 && n <= 3) { this.hud.showCountdown(String(n)); this.audio.countdown(n); this.track.setStartLights(4 - n, false); }
-        if (n <= 0) { this.hud.showCountdown('GO!', true); this.audio.countdown(0); this.track.setStartLights(0, true); this.state = 'racing'; this.time = 0; for (const c of this.cars) c.lapStart = 0; }
+        if (n <= 0) {
+          this.hud.showCountdown('GO!', true); this.audio.countdown(0); this.track.setStartLights(0, true); this.state = 'racing'; this.time = 0;
+          for (const c of this.cars) c.lapStart = 0;
+          if (this.ghost && this.track.open) this.recording = { step: 0.05, samples: [], lapTime: null };
+        }
       }
     } else {
       this.time += dt;
@@ -291,14 +295,18 @@ export class Race {
     // Inputs
     this.players.forEach((car, i) => {
       const r = this.input.read(car.scheme, car.pad, i);
-      if (car.finished) { car.autopilot = true; car.aiSkill = 0.7; }
+      if (car.finished && this.track.open) { car.input.throttle = 0; car.input.steer = 0; car.input.brake = car.vf > 1 ? 1 : 0; car.input.handbrake = car.vf <= 1; car.parked = car.speed < 0.5; }
+      else if (car.finished) { car.autopilot = true; car.aiSkill = 0.7; }
       else { car.input.throttle = r.throttle; car.input.brake = r.brake; car.input.steer = r.steer; car.input.handbrake = r.handbrake; }
       if (r.reset && live && !car.finished) this.resetCar(car);
     });
     let bestPlayerProgress = null;
     for (const p of this.players) if (bestPlayerProgress === null || p.progress > bestPlayerProgress) bestPlayerProgress = p.progress;
     const ctx = { track: this.track, cars: this.cars, live, bestPlayerProgress, time: this.time, dynamic: this.dynamic };
-    for (const car of this.cars) if (!car.isPlayer || car.autopilot) driveAI(car, ctx, dt);
+    for (const car of this.cars) {
+      if (car.finished && this.track.open) { car.input.throttle = 0; car.input.steer = 0; car.input.brake = car.vf > 1 ? 1 : 0; car.input.handbrake = car.vf <= 1; car.parked = car.speed < 0.5; continue; }
+      if (!car.isPlayer || car.autopilot) driveAI(car, ctx, dt);
+    }
 
     // Physics (sub-step for stability at high speed)
     const steps = 2, sdt = dt / steps;
@@ -354,8 +362,10 @@ export class Race {
     const cars = this.cars, R = 2.1;
     for (let i = 0; i < cars.length; i++) {
       const a = cars[i];
+      if (a.parked) continue;
       for (let j = i + 1; j < cars.length; j++) {
         const b = cars[j];
+        if (b.parked) continue;
         const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
         const d2 = dx * dx + dz * dz;
         if (d2 > R * R || d2 === 0) continue;
@@ -382,6 +392,26 @@ export class Race {
 
   _lapLogic(car) {
     const tr = this.track;
+    if (tr.open) {
+      if (!car.finished && car.trackIdx >= tr.finishIdx && tr._param(car.pos, car.trackIdx) >= 0) {
+        const t = this.time - car.lapStart;
+        car.lapTimes.push(t); car.bestLap = t;
+        car.finished = true; car.finishTime = this.time;
+        if (this.dynamic) this._dynamicLap(car, t);
+        if (car.isPlayer) {
+          let sub = `P${car.rank}`;
+          if (this.ghost && car.playerIndex === 0) {
+            const ref = this.ghostData ? this.ghostData.lapTime : null;
+            if (ref) { const d = t - ref; sub = `${d <= 0 ? '' : '+'}${d.toFixed(3)} vs ghost`; }
+            if (this.recording) { this.recording.lapTime = t; this.bestRecording = this.recording; this.recording = null; }
+          }
+          this.audio.lap();
+          this.hud.flash(car.playerIndex, `FINISH · ${fmtTime(t)}`, sub);
+        }
+      }
+      car.progress = tr.progressAt(car.pos, car.trackIdx);
+      return;
+    }
     const sector = tr.sectorOf(car.trackIdx);
     const C = tr.sectorCount;
     if (car.nextSector < C && sector === car.nextSector) car.nextSector++;
@@ -465,6 +495,7 @@ export class Race {
       name: c.name, isPlayer: c.isPlayer, playerIndex: c.playerIndex, color: c.color, rank: c.rank,
       finished: c.finished, time: c.finished ? c.finishTime : null, bestLap: isFinite(c.bestLap) ? c.bestLap : null,
       laps: c.finished ? this.config.laps : Math.max(0, c.lap - 1),
+      stagePct: this.track.open ? Math.round(100 * Math.max(0, Math.min(1, (c.trackIdx - this.track.startIdx) / (this.track.finishIdx - this.track.startIdx)))) : null,
     }));
   }
 

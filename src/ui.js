@@ -92,9 +92,10 @@ export class UI {
         <div class="panel">
           <div class="row between"><h2>${title}</h2><button class="small ghost" data-back>← Back</button></div>
           ${this._trackSection('Real-world circuits', 'Layouts inspired by famous tracks, with their elevation changes', TRACKS.filter(t => t.kind === 'real'), st.trackId)}
-          ${this._trackSection('Original circuits', 'Fictional tracks designed for this game', TRACKS.filter(t => t.kind !== 'real'), st.trackId)}
+          ${this._trackSection('Original circuits', 'Fictional tracks designed for this game', TRACKS.filter(t => t.kind === 'original'), st.trackId)}
+          ${this._trackSection('Point-to-point stages', 'Long one-way runs: start to finish, no laps', TRACKS.filter(t => t.kind === 'stage'), st.trackId)}
           <div class="grid-2" style="margin-top:16px">
-            <div class="field"><label>Laps: <b id="lapsv">${st.laps}</b></label><input type="range" min="1" max="10" value="${st.laps}" data-field="laps"></div>
+            ${tr.open ? `<div class="field"><label>Stage</label><div>Single run, start to finish · ${tr.lengthKm ? tr.lengthKm + ' km' : 'long'}</div></div>` : `<div class="field"><label>Laps: <b id="lapsv">${st.laps}</b></label><input type="range" min="1" max="10" value="${st.laps}" data-field="laps"></div>`}
             ${mode !== 'timetrial' ? `
             <div class="field"><label>AI opponents: <b id="aiv">${st.aiCount}</b></label><input type="range" min="0" max="11" value="${st.aiCount}" data-field="aiCount"></div>
             <div class="field"><label>AI difficulty</label><div class="chips">
@@ -141,7 +142,7 @@ export class UI {
       <div class="grid-3">
         ${tracks.map(t => `<div class="card ${t.id === selectedId ? 'selected' : ''}" data-track="${t.id}" style="cursor:pointer">
           <h4>${t.name}</h4><div class="meta">${t.desc}</div>
-          <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}${t.kind === 'real' ? ' · <span class="badge">real</span>' : ' · <span class="badge" style="opacity:.7">original</span>'}</div></div>`).join('')}
+          <div class="meta" style="margin-top:6px">${'★'.repeat(t.difficulty)}${'☆'.repeat(4 - t.difficulty)} · ${t.theme}${t.lengthKm ? ' · ' + t.lengthKm + ' km' : ''}${t.kind === 'real' ? ' · <span class="badge">real</span>' : t.kind === 'stage' ? ' · <span class="badge done">stage</span>' : ' · <span class="badge" style="opacity:.7">original</span>'}</div></div>`).join('')}
       </div>`;
   }
 
@@ -391,15 +392,15 @@ export class UI {
     this.show(`
       <div class="panel">
         <h1>${heading}</h1>
-        <div class="tagline">${ctx.trackName} · ${ctx.laps} lap${ctx.laps === 1 ? '' : 's'}${ctx.dynamic ? ' · dynamic AI' : ''}</div>
+        <div class="tagline">${ctx.trackName} · ${ctx.stage ? 'point-to-point stage' : `${ctx.laps} lap${ctx.laps === 1 ? '' : 's'}`}${ctx.dynamic ? ' · dynamic AI' : ''}</div>
         ${ctx.mode !== 'timetrial' ? `<div class="podium">${top3.map(r => `<div class="step p${r.rank}"><div class="n">${r.rank}</div><div class="who"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${hex(r.color)};margin-right:5px"></span>${r.name}</div></div>`).join('')}</div>` : ''}
         <table>
-          <tr><th>#</th><th>Driver</th><th class="num">Time</th><th class="num">Best lap</th></tr>
+          <tr><th>#</th><th>Driver</th><th class="num">Time</th><th class="num">${ctx.stage ? 'Stage time' : 'Best lap'}</th></tr>
           ${results.map(r => `<tr class="${r.isPlayer ? 'you' : ''}"><td>${r.rank}</td><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${hex(r.color)};margin-right:8px"></span>${r.name}</td>
-            <td class="num">${r.finished ? (r.rank === 1 || !winner.finished ? fmtTime(r.time) : '+' + (r.time - winner.time).toFixed(3)) : `${r.laps}/${ctx.laps} laps`}</td>
+            <td class="num">${r.finished ? (r.rank === 1 || !winner.finished ? fmtTime(r.time) : '+' + (r.time - winner.time).toFixed(3)) : (r.stagePct !== null && r.stagePct !== undefined ? `${r.stagePct}% of stage` : `${r.laps}/${ctx.laps} laps`)}</td>
             <td class="num" style="${r.bestLap === bestOverall ? 'color:var(--accent-2);font-weight:700' : ''}">${fmtTime(r.bestLap)}</td></tr>`).join('')}
         </table>
-        ${ctx.newBest ? `<div class="notice" style="margin-top:12px">🏁 New personal best lap: <b>${fmtTime(ctx.newBest)}</b>${ctx.ghostSaved ? ' · saved as your ghost' : ''}</div>` : ''}
+        ${ctx.newBest ? `<div class="notice" style="margin-top:12px">🏁 New personal best ${ctx.stage ? 'stage time' : 'lap'}: <b>${fmtTime(ctx.newBest)}</b>${ctx.ghostSaved ? ' · saved as your ghost' : ''}</div>` : ''}
         ${careerHtml}
         <div class="row end" style="margin-top:18px">
           ${ctx.mode !== 'career' ? '<button data-retry>Race again</button>' : ''}
