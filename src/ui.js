@@ -100,7 +100,7 @@ export class UI {
             <div class="field"><label>AI opponents: <b id="aiv">${st.aiCount}</b></label><input type="range" min="0" max="11" value="${st.aiCount}" data-field="aiCount"></div>
             <div class="field"><label>AI difficulty</label><div class="chips">
               ${['Easy', 'Medium', 'Hard', 'Dynamic'].map((d, i) => `<div class="chip ${st.difficulty === i ? 'active' : ''}" data-diff="${i}">${d}</div>`).join('')}
-            </div><div class="meta" style="margin-top:6px">${['Club-level opponents.', 'Quick, consistent drivers.', 'Elite pace, no mistakes.', 'The AI learns your lap times and races at your pace: some just quicker, most just slower.'][st.difficulty]}</div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div><div class="meta" style="margin-top:6px">Your best lap is replayed as a ghost car. Beat it to record a new one.</div></div>`}
+            </div><div class="meta" style="margin-top:6px">${['Club-level opponents.', 'Quick, consistent drivers.', 'Elite pace, no mistakes.', 'The AI reads your pace in real time and races around you: a couple just ahead, most just behind. Works on stages too.'][st.difficulty]}</div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div><div class="meta" style="margin-top:6px">Your best lap is replayed as a ghost car. Beat it to record a new one.</div></div>`}
           </div>
           <div class="grid-2">
             ${st.players.slice(0, nPlayers).map((pl, i) => `

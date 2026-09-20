@@ -158,15 +158,13 @@ export class Race {
     const cfg = this.config;
     const grid = [];
     this.dynamic = !!cfg.dynamic;
-    this.refLap = cfg.referenceLap || null; // player's lap time the dynamic AI aims for
     cfg.ai.forEach((a, i) => {
       const car = new Car({ name: a.name, color: a.color, stats: a.stats, shape: a.shape, isPlayer: false, aiSkill: a.skill });
       car.laneBase = ((i % 3) - 1) * this.track.halfWidth * 0.35;
       if (this.dynamic) {
-        // With no reference lap yet, start a touch conservative so the field doesn't vanish before the first calibration.
-        car.paceScale = this.refLap ? 1.0 : 0.93;
-        // spread the field around the player's pace: a couple slightly quicker, most a touch slower
-        car.paceOffset = 0.975 + (i / Math.max(1, cfg.ai.length - 1)) * 0.07;
+        car.paceScale = 0.95;
+        // Target time gap to the player in seconds: a couple of drivers just ahead, most just behind.
+        car.desiredGap = -1.5 + (i / Math.max(1, cfg.ai.length - 1)) * 6.5;
       }
       grid.push(car);
     });
@@ -318,6 +316,7 @@ export class Race {
     // Laps / progress / ranking
     for (const car of this.cars) this._lapLogic(car);
     this._rank();
+    this._updateDynamic(dt);
 
     // Cameras, audio, fx
     this.players.forEach((car, i) => {
@@ -397,7 +396,6 @@ export class Race {
         const t = this.time - car.lapStart;
         car.lapTimes.push(t); car.bestLap = t;
         car.finished = true; car.finishTime = this.time;
-        if (this.dynamic) this._dynamicLap(car, t);
         if (car.isPlayer) {
           let sub = `P${car.rank}`;
           if (this.ghost && car.playerIndex === 0) {
@@ -422,11 +420,9 @@ export class Race {
         car.lapTimes.push(t);
         const wasBest = t < car.bestLap;
         if (wasBest) car.bestLap = t;
-        if (this.dynamic) this._dynamicLap(car, t);
         if (car.isPlayer) {
           this.audio.lap();
           let sub = wasBest ? 'BEST LAP' : '';
-          if (this.dynamic && car.playerIndex === 0) sub = wasBest ? 'BEST LAP · AI RECALIBRATED' : 'AI RECALIBRATED';
           if (this.ghost && car.playerIndex === 0) {
             const ref = this.ghostData ? this.ghostData.lapTime : null;
             if (ref) { const d = t - ref; sub = `${d <= 0 ? '' : '+'}${d.toFixed(3)} vs ghost`; }
@@ -464,22 +460,42 @@ export class Race {
     this.ranking = sorted;
   }
 
-  /** Dynamic AI: learn the player's pace and recalibrate each AI's pace scale per lap. */
-  _dynamicLap(car, t) {
-    if (car.isPlayer) {
-      // Aim for the player's typical pace (recent laps), not their single best.
-      // The opening lap includes the standing start, so discount it a little.
-      const eff = car.lap === 1 ? t * 0.98 : t;
-      this.playerLapHistory = (this.playerLapHistory || []).concat(eff).slice(-3);
-      const recent = this.playerLapHistory.reduce((a, b) => a + b, 0) / this.playerLapHistory.length;
-      this.refLap = this.refLap ? recent * 0.7 + this.refLap * 0.3 : recent;
-      return;
+  /**
+   * Dynamic AI: real-time pace matching. Keeps a timeline of the lead player's
+   * progress so each AI's time gap to the player is known every frame, then
+   * steers the AI's pace toward its own target gap. Works from the first
+   * metre and on point-to-point stages, no lap needed.
+   */
+  _updateDynamic(dt) {
+    if (!this.dynamic || this.state === 'countdown') return;
+    let p = null;
+    for (const q of this.players) if (!p || q.progress > p.progress) p = q;
+    if (!p) return;
+    this.timeline = this.timeline || [];
+    if (this.timeline.length === 0 || this.time - this.timeline[this.timeline.length - 1][0] >= 0.2) this.timeline.push([this.time, p.progress]);
+    const spacing = this.track.spacing;
+    const vRef = Math.max(8, p.speed);
+    for (const car of this.cars) {
+      if (car.isPlayer || car.paceScale === undefined || car.finished) continue;
+      let gap; // seconds the AI is behind the player (negative = ahead)
+      if (car.progress <= p.progress) gap = this.time - this._timeAtProgress(car.progress);
+      else gap = -((car.progress - p.progress) * spacing) / vRef;
+      gap = Math.max(-15, Math.min(15, gap));
+      const err = gap - car.desiredGap; // positive: further behind than wanted -> more pace
+      const want = Math.max(0.7, Math.min(1.3, 1 + (err / 4) * 0.18));
+      car.paceScale += (want - car.paceScale) * Math.min(1, dt * 1.2);
     }
-    if (!this.refLap || car.paceScale === undefined) return;
-    const want = this.refLap * car.paceOffset;
-    // Lapped slower than wanted (t > want) -> more pace; quicker -> less. Lightly damped so it settles in a lap or two.
-    const correction = Math.pow(t / want, 0.9);
-    car.paceScale = Math.max(0.6, Math.min(1.3, car.paceScale * correction));
+  }
+
+  _timeAtProgress(P) {
+    const tl = this.timeline;
+    if (!tl || !tl.length || P <= tl[0][1]) return tl && tl.length ? tl[0][0] : 0;
+    let lo = 0, hi = tl.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (tl[mid][1] < P) lo = mid + 1; else hi = mid; }
+    const b = tl[lo], a = tl[Math.max(0, lo - 1)];
+    const span = b[1] - a[1];
+    const f = span > 0 ? (P - a[1]) / span : 1;
+    return a[0] + (b[0] - a[0]) * Math.max(0, Math.min(1, f));
   }
 
   /** Best recorded lap of this session (time trial), or null. */

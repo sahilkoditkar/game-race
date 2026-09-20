@@ -146,9 +146,8 @@ class App {
     const difficulty = dynamic ? 0.85 : ([0.45, 0.75, 1.0][st.difficulty] ?? 0.75);
     const ai = mode === 'timetrial' ? [] : quickField(st.aiCount, difficulty, st.players[0].carId);
     const ghost = mode === 'timetrial' ? loadGhost(`${track.id}:${st.players[0].carId}`) : null;
-    const referenceLap = dynamic ? (this.profile.bestLaps[`${track.id}:${st.players[0].carId}`] || null) : null;
     const laps = track.open ? 1 : st.laps;
-    this.startRace({ track, laps, players, ai, mode, ghost, dynamic, referenceLap, quality: this.profile.settings.quality }, { mode, trackName: track.name, laps, trackId: track.id, carId: st.players[0].carId, hasGhost: !!ghost, dynamic, stage: !!track.open });
+    this.startRace({ track, laps, players, ai, mode, ghost, dynamic, quality: this.profile.settings.quality }, { mode, trackName: track.name, laps, trackId: track.id, carId: st.players[0].carId, hasGhost: !!ghost, dynamic, stage: !!track.open });
   }
 
   startCareerRace(seriesId) {
