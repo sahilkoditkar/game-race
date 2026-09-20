@@ -186,7 +186,7 @@ export class Car {
 
     // Elevation: sit on the road surface, pitch with it, and feel gravity on climbs
     const dot = fx * samp.t.x + fz * samp.t.z;
-    const grade = samp.slope * dot; // positive = climbing in the direction we face
+    const grade = track.slopeAtPos(this.pos, this.trackIdx) * dot; // positive = climbing in the direction we face
     this.pos.y = track.heightAtPos(this.pos, this.trackIdx) + 0.12;
     this.pitch += (-Math.atan(grade) - this.pitch) * Math.min(1, dt * 12);
     this.vf -= 9.81 * grade * 0.6 * dt;

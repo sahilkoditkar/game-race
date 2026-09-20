@@ -94,6 +94,23 @@ export class Race {
     this.scene.environmentIntensity = th.night ? 0.5 : 0.9;
   }
 
+  /** Round a world point to the shadow map's texel grid in light space. */
+  _snapToShadowTexels(v) {
+    if (!this._lightBasis) {
+      const dir = new THREE.Vector3(120, 180, 80).normalize();
+      const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
+      const up = new THREE.Vector3().crossVectors(dir, right).normalize();
+      this._lightBasis = { right, up, dir };
+    }
+    const b = this._lightBasis;
+    const cam = this.sun.shadow.camera;
+    const texel = (cam.right - cam.left) / this.sun.shadow.mapSize.x;
+    const r = v.dot(b.right), u = v.dot(b.up), d = v.dot(b.dir);
+    const rs = Math.round(r / texel) * texel, us = Math.round(u / texel) * texel;
+    v.set(0, 0, 0).addScaledVector(b.right, rs).addScaledVector(b.up, us).addScaledVector(b.dir, d);
+    return v;
+  }
+
   _setupGhost() {
     this.ghost = null;
     this.ghostData = this.config.ghost || null; // { samples: [[x,z,heading],...], step, lapTime }
@@ -218,14 +235,20 @@ export class Race {
     const dist = 7.5 + speedF * 2.5;
     const height = 3.0 + speedF * 0.7;
     const fx = Math.sin(h), fz = Math.cos(h);
-    cam.position.set(car.pos.x - fx * dist, car.pos.y + height, car.pos.z - fz * dist);
+    // Vertical tracking is low-passed so crests and dips don't shake the view.
+    const ky = 1 - Math.exp(-dt * 7);
+    if (cam.userData.y === undefined || dt >= 1) { cam.userData.y = car.pos.y; cam.userData.lookY = car.pos.y; }
+    cam.userData.y += (car.pos.y - cam.userData.y) * ky;
+    cam.userData.lookY += (car.pos.y - cam.userData.lookY) * ky;
+    cam.position.set(car.pos.x - fx * dist, cam.userData.y + height, car.pos.z - fz * dist);
     if (cam.userData.shake > 0.01) {
       cam.position.x += (Math.random() - 0.5) * cam.userData.shake;
       cam.position.y += (Math.random() - 0.5) * cam.userData.shake * 0.6;
       cam.userData.shake *= Math.exp(-dt * 7);
     }
     const f = car.forward;
-    const look = this.tmp2.copy(car.pos).addScaledVector(f, 6).add(this.tmp.set(0, 0.9, 0));
+    const look = this.tmp2.copy(car.pos).addScaledVector(f, 6);
+    look.y = cam.userData.lookY + 0.9;
     cam.lookAt(look);
     const fov = 66 + speedF * 14;
     if (Math.abs(cam.fov - fov) > 0.1) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 4); cam.updateProjectionMatrix(); }
@@ -290,9 +313,10 @@ export class Race {
       if (v) this.audio.updateEngine(v, clamp(car.speed / car.stats.maxSpeed, 0, 1), car.input.throttle, car.drifting || (car.input.handbrake && car.speed > 5), (this.players.length > 1 ? 0.7 : 1) * (car.finished ? 0.25 : 1));
     });
 
-    // Shadow camera follows the players
-    const focus = this.players.length === 1 ? this.players[0].pos : this.players[0].pos.clone().add(this.players[1].pos).multiplyScalar(0.5);
-    this.sun.position.set(focus.x + 120, 180, focus.z + 80);
+    // Shadow camera follows the players, snapped to shadow-map texels so edges don't shimmer
+    const focus = this.players.length === 1 ? this.players[0].pos.clone() : this.players[0].pos.clone().add(this.players[1].pos).multiplyScalar(0.5);
+    this._snapToShadowTexels(focus);
+    this.sun.position.set(focus.x + 120, focus.y + 180, focus.z + 80);
     this.sun.target.position.copy(focus);
     if (this.players.length > 1) {
       const d = this.players[0].pos.distanceTo(this.players[1].pos);
