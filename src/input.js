@@ -20,6 +20,21 @@ function padLabel(gp) {
   return name;
 }
 
+/** Raw diagnostics for the settings screen. */
+export function gamepadDiagnostics() {
+  const out = { supported: typeof navigator.getGamepads === 'function', secure: window.isSecureContext, focused: document.hasFocus(), pads: [] };
+  if (!out.supported) return out;
+  try {
+    const pads = navigator.getGamepads() || [];
+    for (let i = 0; i < pads.length; i++) {
+      const gp = pads[i];
+      if (!gp) { out.pads.push(null); continue; }
+      out.pads.push({ index: gp.index, id: gp.id, connected: gp.connected, mapping: gp.mapping, axes: Array.from(gp.axes).map(a => +a.toFixed(2)), buttons: Array.from(gp.buttons).map(b => b.pressed ? 1 : (b.value > 0.1 ? +b.value.toFixed(2) : 0)) });
+    }
+  } catch (e) { out.error = String(e); }
+  return out;
+}
+
 /** Currently connected gamepads: [{ index, name }]. */
 export function connectedPads() {
   const out = [];
@@ -57,8 +72,8 @@ export class Input {
     window.addEventListener('blur', () => this.keys.clear());
     this.padPressed = new Map();
     const announce = () => window.dispatchEvent(new CustomEvent('controls-changed', { detail: connectedPads() }));
-    window.addEventListener('gamepadconnected', announce);
-    window.addEventListener('gamepaddisconnected', announce);
+    window.addEventListener('gamepadconnected', (e) => { console.info('[gamepad] connected:', e.gamepad && e.gamepad.id, 'index', e.gamepad && e.gamepad.index); announce(); });
+    window.addEventListener('gamepaddisconnected', (e) => { console.info('[gamepad] disconnected:', e.gamepad && e.gamepad.id); announce(); });
     // Some browsers only surface a pad after its first button press; poll lightly as a fallback.
     this._padSig = '';
     setInterval(() => {
