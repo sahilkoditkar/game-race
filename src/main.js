@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Input, getControl } from './input.js';
+import { Input, getControl, connectedPads } from './input.js';
 import { AudioSystem } from './audio.js';
 import { UI } from './ui.js';
 import { Race } from './race.js';
@@ -111,7 +111,8 @@ class App {
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (this.race) {
-      const pauseKey = this.input.justPressed('Escape') || this.input.read('none', 0, 0).pause || this.input.read('none', 1, 1).pause;
+      let pauseKey = this.input.justPressed('Escape') || this.input.touch.pause;
+      for (const pd of connectedPads()) if (this.input.read('none', pd.index, -1).pause) pauseKey = true;
       if (pauseKey && this.race.state !== 'finished') this.togglePause();
       if (!this.paused) this.race.update(dt);
       this.race.render();
