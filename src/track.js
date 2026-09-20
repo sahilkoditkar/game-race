@@ -19,23 +19,24 @@ export function sampleSpline(points, spacing = SPACING) {
     const p0 = points[(i - 1 + n) % n], p1 = points[i], p2 = points[(i + 1) % n], p3 = points[(i + 2) % n];
     for (let k = 0; k < 24; k++) raw.push(catmullRom(p0, p1, p2, p3, k / 24));
   }
-  // Resample by arc length
-  const out = [];
-  let acc = 0;
-  out.push(raw[0]);
+  // Resample by arc length: walk the polyline placing a point every `spacing`
+  // metres, carrying the leftover distance across polyline segments so the
+  // samples are uniformly spaced (everything downstream assumes they are).
+  const out = [raw[0]];
+  let carry = 0; // distance travelled since the last placed point
   for (let i = 0; i < raw.length; i++) {
     const a = raw[i], b = raw[(i + 1) % raw.length];
     const dx = b[0] - a[0], dz = b[1] - a[1];
     const segLen = Math.hypot(dx, dz);
-    let d = acc;
-    while (d + spacing <= acc + segLen) {
-      d += spacing;
-      const f = (d - acc) / segLen;
+    let t = spacing - carry;
+    while (t <= segLen) {
+      const f = t / segLen;
       out.push([a[0] + dx * f, a[1] + dz * f]);
+      t += spacing;
     }
-    acc += segLen;
+    carry = segLen - (t - spacing);
   }
-  // drop last if it's essentially the first
+  // The loop closes back onto raw[0]; drop a final point that sits on top of the first.
   const last = out[out.length - 1];
   if (Math.hypot(last[0] - out[0][0], last[1] - out[0][1]) < spacing * 0.5) out.pop();
   return out;
@@ -127,22 +128,28 @@ export class Track {
       const u2 = u * u, u3 = u2 * u;
       out[i] = 0.5 * ((2 * p1) + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
     }
-    // smooth and limit gradient so the road never gets absurdly steep
+    // Limit the gradient so the road never gets absurdly steep, then smooth.
+    // Smoothing always runs last: the clamp creates kinks, and kinks feel like
+    // bumps at speed.
     const maxStep = SPACING * 0.14;
-    for (let pass = 0; pass < 3; pass++) {
-      const copy = Float32Array.from(out);
-      for (let i = 0; i < N; i++) {
-        let acc = 0;
-        for (let k = -6; k <= 6; k++) acc += copy[(i + k + N) % N];
-        out[i] = acc / 13;
-      }
+    const clampGrade = () => {
       for (let i = 0; i < N * 2; i++) {
         const a = i % N, b = (i + 1) % N;
         const d = out[b] - out[a];
-        if (d > maxStep) { out[b] = out[a] + maxStep; }
-        else if (d < -maxStep) { out[b] = out[a] - maxStep; }
+        if (d > maxStep) out[b] = out[a] + maxStep;
+        else if (d < -maxStep) out[b] = out[a] - maxStep;
       }
-    }
+    };
+    const smooth = (half) => {
+      const copy = Float32Array.from(out);
+      const w = half * 2 + 1;
+      for (let i = 0; i < N; i++) {
+        let acc = 0;
+        for (let k = -half; k <= half; k++) acc += copy[(i + k + N) % N];
+        out[i] = acc / w;
+      }
+    };
+    clampGrade(); smooth(10); clampGrade(); smooth(8); smooth(6); smooth(4);
     // make the start/finish line sit exactly at height 0 and blend the loop closure
     const off = out[0];
     for (let i = 0; i < N; i++) out[i] -= off;
@@ -182,11 +189,24 @@ export class Track {
   /** Road height under a world position (uses the nearest-sample hint for speed). */
   heightAtPos(pos, idx) {
     const N = this.samples.length;
+    let f = Math.max(-1, Math.min(1, this._param(pos, idx)));
+    // Catmull-Rom through the four surrounding samples so the height is C1-continuous
+    let i1 = idx, u = f;
+    if (f < 0) { i1 = (idx - 1 + N) % N; u = f + 1; }
+    const h0 = this.samples[(i1 - 1 + N) % N].p.y, h1 = this.samples[i1].p.y;
+    const h2 = this.samples[(i1 + 1) % N].p.y, h3 = this.samples[(i1 + 2) % N].p.y;
+    const u2 = u * u, u3 = u2 * u;
+    return 0.5 * ((2 * h1) + (-h0 + h2) * u + (2 * h0 - 5 * h1 + 4 * h2 - h3) * u2 + (-h0 + 3 * h1 - 3 * h2 + h3) * u3);
+  }
+
+  /** Road slope (dy/ds) under a world position, interpolated between samples. */
+  slopeAtPos(pos, idx) {
+    const N = this.samples.length;
     const s = this.samples[idx];
-    const f = ((pos.x - s.p.x) * s.t.x + (pos.z - s.p.z) * s.t.z) / SPACING;
+    const f = Math.max(-1, Math.min(1, this._param(pos, idx)));
     const j = f >= 0 ? (idx + 1) % N : (idx - 1 + N) % N;
-    const w = Math.min(1, Math.abs(f));
-    return s.p.y * (1 - w) + this.samples[j].p.y * w;
+    const w = Math.abs(f);
+    return s.slope * (1 - w) + this.samples[j].slope * w;
   }
 
   /** Terrain height for scenery / ground mesh. Hugs the road nearby, rolls freely far away. */
@@ -242,11 +262,25 @@ export class Track {
     return (pos.x - s.p.x) * s.n.x + (pos.z - s.p.z) * s.n.z;
   }
 
+  /**
+   * Longitudinal parameter (in samples) of a point relative to sample idx.
+   * Points off the centreline on a curve sweep less (inside) or more (outside)
+   * distance per metre of track, so the raw tangent projection is corrected by
+   * the local curvature; without this the height/progress jump at each sample.
+   */
+  _param(pos, idx) {
+    const s = this.samples[idx];
+    const dx = pos.x - s.p.x, dz = pos.z - s.p.z;
+    let f = (dx * s.t.x + dz * s.t.z) / SPACING;
+    const lat = dx * s.n.x + dz * s.n.z;
+    const k = 1 - s.curv * lat;
+    if (k > 0.3) f /= k;
+    return f;
+  }
+
   /** Continuous progress along the track in sample units. */
   progressAt(pos, idx) {
-    const s = this.samples[idx];
-    const f = ((pos.x - s.p.x) * s.t.x + (pos.z - s.p.z) * s.t.z) / SPACING;
-    return idx + Math.max(-0.5, Math.min(0.5, f));
+    return idx + Math.max(-0.5, Math.min(0.5, this._param(pos, idx)));
   }
 
   sample(i) { const N = this.samples.length; return this.samples[((i % N) + N) % N]; }
