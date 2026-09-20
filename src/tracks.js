@@ -33,7 +33,7 @@ export const TRACKS = [
   {
     id: 'harbor', name: 'Harbor Sprint', theme: 'coastal', difficulty: 2, kind: 'original',
     desc: 'A short, punchy dockside loop. Lap after lap of close racing.',
-    width: 14, elevationAmp: 4,
+    width: 12, elevationAmp: 4,
     points: [
       [0, 0], [140, 0], [200, 60], [150, 140], [220, 220], [120, 290], [-20, 250],
       [-90, 160], [-200, 120], [-240, 30], [-150, -20], [-60, 10],
@@ -42,7 +42,7 @@ export const TRACKS = [
   {
     id: 'desert', name: 'Mesa Verde Dash', theme: 'desert', difficulty: 3, kind: 'original',
     desc: 'Long straights, brutal hairpins, and a heat haze.',
-    width: 17, elevationAmp: 8,
+    width: 18, elevationAmp: 8,
     points: [
       [0, 0], [200, 0], [400, 0], [485, 60], [475, 150], [385, 175],
       [300, 120], [200, 140], [150, 235], [200, 325], [350, 345],
@@ -53,7 +53,7 @@ export const TRACKS = [
   {
     id: 'canyon', name: 'Canyon Run', theme: 'desert', difficulty: 2, kind: 'original',
     desc: 'Wide, sweeping bends carved through a red-rock canyon. Flat out.',
-    width: 17, elevationAmp: 14,
+    width: 19, elevationAmp: 14,
     points: [
       [0, 0], [300, 0], [500, 80], [560, 220], [450, 320], [300, 300], [200, 400],
       [50, 480], [-150, 450], [-300, 360], [-350, 200], [-280, 80], [-150, 40],
@@ -62,7 +62,7 @@ export const TRACKS = [
   {
     id: 'alpine', name: 'Alpine Ring', theme: 'alpine', difficulty: 3, kind: 'original',
     desc: 'Snow-lined mountain road with relentless direction changes.',
-    width: 14, elevationAmp: 22,
+    width: 13, elevationAmp: 22,
     points: [
       [0, 0], [130, 0], [205, 60], [185, 155], [265, 215], [255, 315],
       [155, 345], [60, 285], [-40, 325], [-145, 295], [-165, 190],
@@ -72,7 +72,7 @@ export const TRACKS = [
   {
     id: 'pinecrest', name: 'Pinecrest Forest', theme: 'forest', difficulty: 2, kind: 'original',
     desc: 'A rolling woodland road with blind crests and a tight final complex.',
-    width: 14, elevationAmp: 16,
+    width: 13, elevationAmp: 16,
     points: [
       [0, 0], [150, 0], [250, 70], [240, 180], [150, 240], [30, 200], [-50, 280],
       [-180, 300], [-260, 200], [-230, 90], [-130, 30],
@@ -81,7 +81,7 @@ export const TRACKS = [
   {
     id: 'neon', name: 'Neon City Nights', theme: 'city', difficulty: 4, kind: 'original',
     desc: 'A night street circuit between towers. Tight, technical, unforgiving.',
-    width: 14, elevationAmp: 3,
+    width: 12, elevationAmp: 3,
     points: [
       [0, 0], [180, 0], [300, 40], [325, 140], [245, 195], [125, 170],
       [60, 250], [130, 335], [265, 345], [335, 425], [245, 485],
@@ -94,7 +94,7 @@ export const TRACKS = [
   {
     id: 'silverstone', name: 'Silverstone', theme: 'grass', difficulty: 3, kind: 'real',
     desc: 'Inspired by the British GP circuit: Copse, Maggotts–Becketts, Hangar Straight, Stowe.',
-    width: 15,
+    width: 16,
     elevation: [[0, 0], [0.15, 3], [0.3, -2], [0.45, 4], [0.6, 1], [0.75, -3], [0.9, 2]],
     points: [
       [0, 0], [130, -105], [250, -200], [310, -270], [380, -290], [440, -250], [445, -180], [500, -130], [570, -160], [575, -240],
@@ -106,7 +106,7 @@ export const TRACKS = [
   {
     id: 'monza', name: 'Monza', theme: 'forest', difficulty: 2, kind: 'real',
     desc: 'Inspired by the Temple of Speed: long straights, three chicanes, the Lesmos and Parabolica.',
-    width: 15,
+    width: 14,
     elevation: [[0, 0], [0.25, 1.5], [0.5, -1], [0.75, 1]],
     points: [
       [0, 0], [200, 0], [400, 0], [470, 22], [535, -35], [620, 40], [660, 170], [660, 280], [625, 335], [660, 390],
@@ -117,7 +117,7 @@ export const TRACKS = [
   {
     id: 'spa', name: 'Spa-Francorchamps', theme: 'forest', difficulty: 4, kind: 'real',
     desc: 'Inspired by the Ardennes classic: La Source, the Eau Rouge climb, Kemmel, Pouhon, Blanchimont, Bus Stop.',
-    width: 15,
+    width: 14,
     elevation: [[0, 0], [0.04, -2], [0.09, -22], [0.13, -4], [0.2, 12], [0.28, 16], [0.36, 8], [0.45, -4], [0.55, -18], [0.63, -30], [0.72, -22], [0.82, -10], [0.92, -2]],
     points: [
       [0, 0], [80, 0], [130, 20], [135, 80], [90, 120], [40, 200], [60, 270], [200, 300], [450, 330], [650, 350],
@@ -150,7 +150,7 @@ export const TRACKS = [
   {
     id: 'bahrain', name: 'Bahrain', theme: 'desert', difficulty: 3, kind: 'real',
     desc: 'Inspired by the Sakhir desert circuit: heavy braking into T1 and a twisting middle sector.',
-    width: 15,
+    width: 16,
     elevation: [[0, 0], [0.2, 3], [0.35, -2], [0.5, 4], [0.65, 6], [0.8, 2]],
     points: [
       [0, 0], [250, 0], [430, 0], [480, 40], [450, 100], [500, 150], [560, 230], [520, 320], [430, 380], [320, 420],
@@ -172,7 +172,7 @@ export const TRACKS = [
   {
     id: 'zandvoort', name: 'Zandvoort', theme: 'coastal', difficulty: 3, kind: 'real',
     desc: 'Inspired by the Dutch dunes circuit: Tarzan, the flowing dune section and the banked final corner.',
-    width: 14,
+    width: 13,
     elevation: [[0, 0], [0.12, -4], [0.25, 6], [0.4, 2], [0.55, 9], [0.7, 4], [0.85, -3]],
     points: [
       [0, 0], [200, 0], [300, 40], [280, 120], [200, 160], [140, 240], [180, 330], [120, 400], [20, 380], [-40, 300],

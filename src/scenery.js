@@ -115,7 +115,7 @@ export function buildScenery(track, quality = 'high') {
   const s0 = track.samples[0];
   const stand = buildGrandstand(th, rand);
   const side = -1; // right side of the track
-  stand.position.set(s0.p.x + s0.n.x * side * (track.wallOffset + 12), s0.p.y - 0.3, s0.p.z + s0.n.z * side * (track.wallOffset + 12));
+  stand.position.set(s0.p.x + s0.n.x * side * (s0.wall + 12), s0.p.y - 0.3, s0.p.z + s0.n.z * side * (s0.wall + 12));
   stand.rotation.y = s0.heading + Math.PI / 2 * side;
   g.add(stand);
 
@@ -126,7 +126,7 @@ export function buildScenery(track, quality = 'high') {
     const s = track.samples[i];
     const sd = rand() > 0.5 ? 1 : -1;
     const m = new THREE.Mesh(boardGeo, boardMat);
-    m.position.set(s.p.x + s.n.x * sd * (track.wallOffset + 4), s.p.y + 1.0, s.p.z + s.n.z * sd * (track.wallOffset + 4));
+    m.position.set(s.p.x + s.n.x * sd * (s.wall + 4), s.p.y + 1.0, s.p.z + s.n.z * sd * (s.wall + 4));
     m.rotation.y = s.heading;
     m.castShadow = highQ;
     g.add(m);
@@ -206,7 +206,7 @@ function addStreetLights(g, track, highQ) {
   for (let i = 0; i < track.count; i += step) {
     const s = track.samples[i];
     const sd = (Math.floor(i / step) % 2) ? 1 : -1;
-    const x = s.p.x + s.n.x * sd * (track.wallOffset + 1.5), z = s.p.z + s.n.z * sd * (track.wallOffset + 1.5);
+    const x = s.p.x + s.n.x * sd * (s.wall + 1.5), z = s.p.z + s.n.z * sd * (s.wall + 1.5);
     const y = s.p.y;
     const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(x, y + 3.5, z); g.add(pole);
     const lamp = new THREE.Mesh(lampGeo, lampMat); lamp.position.set(x, y + 7.1, z); g.add(lamp);

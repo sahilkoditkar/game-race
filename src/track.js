@@ -46,8 +46,8 @@ export class Track {
   constructor(def, quality = 'high') {
     this.def = def;
     this.theme = THEMES[def.theme];
-    this.halfWidth = def.width / 2;
-    this.wallOffset = this.halfWidth + 3.2;
+    this.halfWidth = def.width / 2;   // nominal; per-sample values live in samples[i].hw / .wall
+    this.wallOffset = this.halfWidth + 3.2; // replaced by the maximum once samples are built
     this.spacing = SPACING;
     this.group = new THREE.Group();
     this.quality = quality;
@@ -63,6 +63,7 @@ export class Track {
     const pts = sampleSpline(this.def.points, SPACING);
     const N = pts.length;
     const heights = this._elevationProfile(N);
+    const widths = this._widthProfile(N);
     this.samples = [];
     for (let i = 0; i < N; i++) {
       const prev = pts[(i - 1 + N) % N], next = pts[(i + 1) % N];
@@ -76,8 +77,12 @@ export class Track {
         curv: 0,
         slope: (heights[(i + 1) % N] - heights[(i - 1 + N) % N]) / (2 * SPACING),
         heading: Math.atan2(tx, tz),
+        hw: (this.def.width / 2) * widths[i],
+        wall: (this.def.width / 2) * widths[i] + 3.2,
       });
     }
+    this.maxHalfWidth = Math.max(...this.samples.map(q => q.hw));
+    this.wallOffset = this.maxHalfWidth + 3.2;
     this.minHeight = Math.min(...heights);
     this.maxHeight = Math.max(...heights);
     this._buildGrid();
@@ -100,6 +105,25 @@ export class Track {
   }
 
   get count() { return this.samples.length; }
+
+  /** Width multiplier around the lap: the road breathes between ~0.82x and ~1.18x. */
+  _widthProfile(N) {
+    let seed = 7;
+    for (const ch of this.def.id) seed = (seed * 33 + ch.charCodeAt(0)) >>> 0;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const a1 = 1 + Math.floor(rand() * 3), a2 = 3 + Math.floor(rand() * 4), a3 = 6 + Math.floor(rand() * 5);
+    const p1 = rand() * 6.28, p2 = rand() * 6.28, p3 = rand() * 6.28;
+    const out = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const t = (i / N) * Math.PI * 2;
+      let w = 1 + 0.10 * Math.sin(a1 * t + p1) + 0.06 * Math.sin(a2 * t + p2) + 0.03 * Math.sin(a3 * t + p3);
+      // the start straight stays at the nominal width so the grid always fits
+      const dStart = Math.min(i, N - i) / N;
+      const k = Math.min(1, dStart / 0.04);
+      out[i] = 1 + (w - 1) * k;
+    }
+    return out;
+  }
 
   /** Height profile around the lap, one value per sample. */
   _elevationProfile(N) {
@@ -301,7 +325,7 @@ export class Track {
     const back = 6 + row * 7 + (slot % 2) * 3.5;
     const idx = ((-Math.round(back / SPACING)) % this.count + this.count) % this.count;
     const s = this.samples[idx];
-    const lateral = side * this.halfWidth * 0.42;
+    const lateral = side * s.hw * 0.42;
     return {
       x: s.p.x + s.n.x * lateral, y: s.p.y, z: s.p.z + s.n.z * lateral, heading: s.heading, idx,
     };
@@ -310,14 +334,15 @@ export class Track {
   // ------------------------------------------------------------------ Meshes
   _buildMeshes() {
     const th = this.theme;
-    const N = this.samples.length, hw = this.halfWidth;
+    const N = this.samples.length;
     const highQ = this.quality !== 'low';
+    const HW = (q) => q.hw, NHW = (q) => -q.hw, WALL = (q) => q.wall, NWALL = (q) => -q.wall;
 
     // Road surface
     const roadTex = makeRoadTexture(th);
     roadTex.wrapT = THREE.RepeatWrapping;
     roadTex.wrapS = THREE.ClampToEdgeWrapping;
-    const road = this._strip(N, hw, -hw, 0.12, (i, side) => [side === 0 ? 0 : 1, (i * SPACING) / 12]);
+    const road = this._strip(N, HW, NHW, 0.12, (i, side) => [side === 0 ? 0 : 1, (i * SPACING) / 12]);
     const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92, metalness: 0.02, color: 0xffffff });
     const roadMesh = new THREE.Mesh(road, roadMat);
     roadMesh.receiveShadow = true;
@@ -325,13 +350,13 @@ export class Track {
 
     // Runoff (gravel/grass verge between road and wall)
     const runoffMat = new THREE.MeshStandardMaterial({ color: th.night ? 0x333540 : lerpColor(th.ground, 0x8a8a80, 0.55), roughness: 1 });
-    const runoffL = this._strip(N, this.wallOffset + 0.5, hw + 1.1, 0.1);
-    const runoffR = this._strip(N, -hw - 1.1, -this.wallOffset - 0.5, 0.1);
+    const runoffL = this._strip(N, (q) => q.wall + 0.5, (q) => q.hw + 1.1, 0.1);
+    const runoffR = this._strip(N, (q) => -q.hw - 1.1, (q) => -q.wall - 0.5, 0.1);
     for (const g of [runoffL, runoffR]) { const m = new THREE.Mesh(g, runoffMat); m.receiveShadow = true; this.group.add(m); }
 
     // Curbs (red/white) at corners, plain grey elsewhere
-    const curbL = this._strip(N, hw + 1.1, hw, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
-    const curbR = this._strip(N, -hw, -hw - 1.1, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
+    const curbL = this._strip(N, (q) => q.hw + 1.1, HW, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
+    const curbR = this._strip(N, NHW, (q) => -q.hw - 1.1, 0.13, null, (i) => curbColor(this.samples[i].curv, i));
     const curbMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
     for (const g of [curbL, curbR]) { const m = new THREE.Mesh(g, curbMat); m.receiveShadow = true; this.group.add(m); }
 
@@ -339,7 +364,7 @@ export class Track {
     const wallH = 1.1;
     const wallMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
     for (const side of [1, -1]) {
-      const g = this._wall(N, side * this.wallOffset, wallH, (i) => {
+      const g = this._wall(N, (q) => side * q.wall, wallH, (i) => {
         const band = Math.floor(i / 6) % 2;
         if (th.night) return band ? 0x2f80ff : 0xf5f5f5;
         return band ? 0xe53935 : 0xf4f4f4;
@@ -348,13 +373,13 @@ export class Track {
       m.castShadow = highQ; m.receiveShadow = true;
       this.group.add(m);
       // top rail
-      const rail = this._strip(N, side * this.wallOffset + 0.35, side * this.wallOffset - 0.35, wallH, null, () => 0x6d7078);
+      const rail = this._strip(N, (q) => side * q.wall + 0.35, (q) => side * q.wall - 0.35, wallH, null, () => 0x6d7078);
       this.group.add(new THREE.Mesh(rail, wallMat));
     }
 
     // Start / finish line
     const s0 = this.samples[0];
-    const lineGeo = new THREE.PlaneGeometry(hw * 2, 3);
+    const lineGeo = new THREE.PlaneGeometry(s0.hw * 2, 3);
     const lineTex = makeCheckerTexture();
     lineTex.repeat.set(8, 2); lineTex.wrapS = lineTex.wrapT = THREE.RepeatWrapping;
     const line = new THREE.Mesh(lineGeo, new THREE.MeshStandardMaterial({ map: lineTex, roughness: 0.9 }));
@@ -373,10 +398,10 @@ export class Track {
     const postGeo = new THREE.BoxGeometry(0.5, 7, 0.5);
     for (const sd of [1, -1]) {
       const post = new THREE.Mesh(postGeo, postMat);
-      post.position.set(sd * (this.wallOffset + 1.2), 3.5, 0);
+      post.position.set(sd * (s0.wall + 1.2), 3.5, 0);
       post.castShadow = highQ; gantry.add(post);
     }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(this.wallOffset * 2 + 3, 1.6, 1), new THREE.MeshStandardMaterial({ map: makeBannerTexture(this.def.name, th), roughness: 0.6 }));
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(s0.wall * 2 + 3, 1.6, 1), new THREE.MeshStandardMaterial({ map: makeBannerTexture(this.def.name, th), roughness: 0.6 }));
     beam.position.set(0, 6.4, 0); beam.castShadow = highQ; gantry.add(beam);
     // start lights
     const lightGeo = new THREE.SphereGeometry(0.28, 12, 12);
@@ -406,8 +431,9 @@ export class Track {
     const c = new THREE.Color();
     for (let i = 0; i < N; i++) {
       const s = this.samples[i];
-      const ax = s.p.x + s.n.x * a, az = s.p.z + s.n.z * a;
-      const bx = s.p.x + s.n.x * b, bz = s.p.z + s.n.z * b;
+      const A = typeof a === 'function' ? a(s, i) : a, Bv = typeof b === 'function' ? b(s, i) : b;
+      const ax = s.p.x + s.n.x * A, az = s.p.z + s.n.z * A;
+      const bx = s.p.x + s.n.x * Bv, bz = s.p.z + s.n.z * Bv;
       const yy = s.p.y + y;
       pos.set([ax, yy, az, bx, yy, bz], i * 6);
       const ua = uvFn ? uvFn(i, 0) : [0, i * SPACING / 8], ub = uvFn ? uvFn(i, 1) : [1, i * SPACING / 8];
@@ -436,7 +462,8 @@ export class Track {
     const c = new THREE.Color();
     for (let i = 0; i < N; i++) {
       const s = this.samples[i];
-      const x = s.p.x + s.n.x * offset, z = s.p.z + s.n.z * offset;
+      const off = typeof offset === 'function' ? offset(s, i) : offset;
+      const x = s.p.x + s.n.x * off, z = s.p.z + s.n.z * off;
       pos.set([x, s.p.y - 3, z, x, s.p.y + h, z], i * 6);
       c.set(colorFn(i)); col.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
       uv.set([i / N, 0, i / N, 1], i * 4);

@@ -92,7 +92,7 @@ export class Car {
     // Track relation
     this.trackIdx = track.nearestIndex(this.pos, this.trackIdx);
     const lat = track.lateral(this.pos, this.trackIdx);
-    this.offroad = Math.abs(lat) > track.halfWidth + 0.6;
+    this.offroad = Math.abs(lat) > track.samples[this.trackIdx].hw + 0.6;
 
     const prevVf = this.vf;
 
@@ -162,7 +162,7 @@ export class Car {
     this.trackIdx = track.nearestIndex(this.pos, this.trackIdx);
     const samp = track.samples[this.trackIdx];
     const lat2 = track.lateral(this.pos, this.trackIdx);
-    const limit = track.wallOffset - 1.0;
+    const limit = samp.wall - 1.0;
     if (Math.abs(lat2) > limit) {
       const side = Math.sign(lat2);
       const pen = Math.abs(lat2) - limit;

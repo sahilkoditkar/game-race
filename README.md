@@ -20,7 +20,11 @@ hosted directly on GitHub Pages (or any static host).
 - **Career mode**: four championships (Rookie Cup → Pro Series → Grand Prix → Legends Endurance),
   points standings, prize money, a garage with four purchasable cars and four upgrade lines.
   Progress is saved in the browser (`localStorage`).
-- Quick Race and Time Trial modes with adjustable laps, opponent count and AI difficulty.
+- Quick Race and Time Trial modes with adjustable laps, opponent count and AI difficulty
+  (Easy, Medium, Hard, or **Dynamic**, where the AI learns your lap times during the race and
+  paces itself around you: a few drivers just quicker, most just slower).
+- Road width varies from track to track and along each lap, from tight 10 m street sections
+  to 20 m+ desert straights.
   Time Trial replays your best lap as a translucent **ghost car** (stored per track and car).
 - Touch controls appear automatically on phones and tablets.
 - AI drivers with racing lines, braking for corners, overtaking/avoidance and un-stuck logic.
