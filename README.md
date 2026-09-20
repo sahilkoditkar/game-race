@@ -24,8 +24,8 @@ hosted directly on GitHub Pages (or any static host).
   points standings, prize money, a garage with four purchasable cars and four upgrade lines.
   Progress is saved in the browser (`localStorage`).
 - Quick Race and Time Trial modes with adjustable laps, opponent count and AI difficulty
-  (Easy, Medium, Hard, or **Dynamic**, where the AI learns your lap times during the race and
-  paces itself around you: a few drivers just quicker, most just slower).
+  (Easy, Medium, Hard, or **Dynamic**, where the AI measures its time gap to you continuously and
+  paces itself around you: a couple of drivers just ahead, most just behind, on circuits and stages).
 - Road width varies from track to track and along each lap, from tight 10 m street sections
   to 20 m+ desert straights.
   Time Trial replays your best lap as a translucent **ghost car** (stored per track and car).

@@ -71,11 +71,8 @@ export function driveAI(car, ctx, dt) {
   // Rubber banding relative to best human (keeps races close but never blatant)
   if (ctx.bestPlayerProgress !== null && ctx.bestPlayerProgress !== undefined) {
     const gap = car.progress - ctx.bestPlayerProgress; // samples
-    if (ctx.dynamic) {
-      // Dynamic: lean harder on the band so the pack stays within sight either way
-      const g = Math.max(-1, Math.min(1, gap / 160));
-      target *= 1 - g * 0.14;
-    } else if (gap > 120) target *= 0.94;
+    if (ctx.dynamic) { /* handled by the per-car pace scale */ }
+    else if (gap > 120) target *= 0.94;
     else if (gap < -140) target *= 1.06;
   }
 
