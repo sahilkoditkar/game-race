@@ -104,7 +104,7 @@ kbd { font-family: ui-monospace, Menlo, monospace; background: rgba(255,255,255,
 .hud .bottom-right { position: absolute; bottom: 20px; right: 20px; text-align: right; }
 .hud .bottom-left { position: absolute; bottom: 20px; left: 20px; }
 .hud .pos { font-size: 56px; font-weight: 900; font-style: italic; line-height: 1; text-shadow: 0 4px 16px rgba(0,0,0,.6); }
-.hud .pos small { font-size: 20px; vertical-align: top; }
+.hud .pos .of { font-size: 18px; font-weight: 600; font-style: normal; color: rgba(255,255,255,.7); margin-left: 8px; vertical-align: baseline; }
 .hud .lap { font-size: 18px; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
 .hud .lap span { color: rgba(255,255,255,.75); font-weight: 400; }
 .hud .time { font-size: 15px; font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px rgba(0,0,0,.6); }

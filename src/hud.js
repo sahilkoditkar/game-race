@@ -18,7 +18,7 @@ export class HUD {
       el.innerHTML = `
         <div class="top-left">
           <div class="name">${config.players[i].name}</div>
-          <div class="pos"><b>-</b><small>/${cars.length}</small></div>
+          <div class="pos"><b>-</b>${cars.length > 1 ? `<span class="of">/ ${cars.length}</span>` : ''}</div>
           <div class="lap">LAP <b>0</b><span>/${config.laps}</span></div>
           <div class="time"><span>LAP</span> <b>0:00.000</b></div>
           <div class="time"><span>BEST</span> <b>--:--.---</b></div>
@@ -33,7 +33,7 @@ export class HUD {
         <div class="wrong hidden">⚠ WRONG WAY</div>`;
       const q = (sel) => el.querySelector(sel);
       this.panels.push({
-        el, pos: q('.pos b'), posTotal: q('.pos small'), lap: q('.lap b'), lapTime: q('.time:nth-of-type(4) b'), best: q('.time:nth-of-type(5) b'),
+        el, pos: q('.pos b'), lap: q('.lap b'), lapTime: q('.time:nth-of-type(4) b'), best: q('.time:nth-of-type(5) b'),
         speed: q('.speed b'), bar: q('.gear-bar i'), map: q('.minimap'), msg: q('.msg'), msgMain: q('.msg .main'), msgSub: q('.msg .sub'),
         wrong: q('.wrong'), standings: q('.standings'), msgTimer: 0,
       });
