@@ -1,6 +1,6 @@
 import { TRACKS, getTrack } from './tracks.js';
 import { CARS, SERIES, UPGRADES, PLAYER_COLORS, getCar, getSeries, upgradeCost, effectiveStats } from './data.js';
-import { CONTROLS, getControl, padConnected } from './input.js';
+import { listControls, getControl, connectedPads } from './input.js';
 import { seriesState, isSeriesUnlocked, standings, canBuyUpgrade } from './career.js';
 import { fmtTime } from './race.js';
 
@@ -12,9 +12,18 @@ export class UI {
   constructor(app) {
     this.app = app;
     this.el = document.getElementById('screen');
+    this.rerender = null; // re-render function for screens that show a controls chooser
+    window.addEventListener('controls-changed', (e) => {
+      const pads = e.detail || [];
+      if (this._padCount !== undefined && pads.length !== this._padCount) {
+        this.toast(pads.length > this._padCount ? `🎮 ${pads[pads.length - 1].name} connected` : 'Gamepad disconnected');
+      }
+      this._padCount = pads.length;
+      if (this.rerender && !this.el.classList.contains('empty')) this.rerender();
+    });
   }
 
-  hide() { this.el.innerHTML = ''; this.el.classList.add('empty'); }
+  hide() { this.el.innerHTML = ''; this.el.classList.add('empty'); this.rerender = null; }
 
   show(html, { transparent = false } = {}) {
     this.el.classList.remove('empty');
@@ -37,6 +46,7 @@ export class UI {
   // ------------------------------------------------------------ Main menu
   mainMenu() {
     const p = this.app.profile;
+    this.rerender = null;
     this.show(`
       <div class="panel narrow">
         <div class="logo">APEX <span>RUSH</span></div>
@@ -121,6 +131,7 @@ export class UI {
       });
       this.on('[data-color]', 'click', (e, el) => { const [i, ci] = el.dataset.color.split(':').map(Number); st.players[i].colorIndex = ci; render(); });
       this.on('[data-start]', 'click', () => app.startQuickRace(mode));
+      this.rerender = render;
     };
     render();
   }
@@ -136,10 +147,15 @@ export class UI {
 
   _controlChips(current, attr, playerIndex = 0) {
     const touch = this.app.input.isTouchDevice;
-    return `<div class="chips">${CONTROLS.filter(c => !c.touchOnly || (touch && playerIndex === 0)).map(c => {
-      const pad = c.pad >= 0 ? (padConnected(c.pad) ? ' <span class="badge done">connected</span>' : ' <span class="badge" style="opacity:.6">not detected</span>') : '';
-      return `<div class="chip ${current === c.id ? 'active' : ''}" ${attr} data-id="${c.id}" title="${c.keys}">${c.name}${pad}</div>`;
-    }).join('')}</div>`;
+    const list = listControls().filter(c => !c.touchOnly || (touch && playerIndex === 0));
+    const pads = connectedPads();
+    const selectedMissing = /^pad\d+$/.test(current || '') && !list.some(c => c.id === current);
+    const chips = list.map(c => `<div class="chip ${current === c.id ? 'active' : ''}" ${attr} data-id="${c.id}" title="${c.keys}">${c.name}${c.sub ? ` <span class="badge done">${c.sub}</span>` : ''}</div>`);
+    if (selectedMissing) chips.push(`<div class="chip active" ${attr} data-id="${current}" title="Reconnect the controller">🎮 ${getControl(current).name} <span class="badge locked">disconnected</span></div>`);
+    const hint = pads.length === 0
+      ? '<div class="meta" style="margin-top:6px">No gamepad detected. Plug one in and press any button on it; it will appear here.</div>'
+      : `<div class="meta" style="margin-top:6px">${pads.length} gamepad${pads.length > 1 ? 's' : ''} detected.</div>`;
+    return `<div class="chips">${chips.join('')}</div>${hint}`;
   }
 
   _bestLapLine(trackId) {
@@ -198,6 +214,7 @@ export class UI {
           }).join('')}
         </div>
       </div>`);
+    this.rerender = () => this.career();
     this.on('[data-back]', 'click', () => this.mainMenu());
     this.on('[data-garage]', 'click', () => this.garage());
     this.on('[data-ctl]', 'click', (e, el) => { p.settings.p1Control = el.dataset.id; app.save(); this.career(); });
@@ -218,6 +235,7 @@ export class UI {
   // ------------------------------------------------------------ Garage
   garage() {
     const app = this.app, p = app.profile;
+    this.rerender = null;
     const sel = getCar(p.selected);
     const lv = p.upgrades[sel.id] || {};
     this.show(`
@@ -291,6 +309,7 @@ export class UI {
           </div>
         </div>
       </div>`);
+    this.rerender = () => this.settings();
     this.on('[data-back]', 'click', () => this.mainMenu());
     this.on('[data-q]', 'click', (e, el) => { s.quality = el.dataset.q; app.save(); this.settings(); });
     this.on('[data-sound]', 'click', (e, el) => { s.sound = el.dataset.sound === '1'; app.audio.setEnabled(s.sound); app.save(); this.settings(); });

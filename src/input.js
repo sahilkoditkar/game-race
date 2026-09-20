@@ -5,18 +5,43 @@ export const SCHEMES = {
   arrows: { name: 'Arrow keys', up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], hb: ['ShiftRight', 'ControlRight', 'Slash'], reset: ['Period'] },
 };
 
-/** Selectable control options. Each maps to a keyboard scheme and/or a gamepad index. */
-export const CONTROLS = [
+/** Fixed control options. Gamepads are added dynamically from `connectedPads()`. */
+const BASE_CONTROLS = [
   { id: 'wasd', name: 'Keyboard · WASD', scheme: 'wasd', pad: -1, keys: 'W A S D · Shift' },
   { id: 'arrows', name: 'Keyboard · Arrows', scheme: 'arrows', pad: -1, keys: '↑ ← ↓ → · R-Shift' },
-  { id: 'pad0', name: 'Gamepad 1', scheme: 'none', pad: 0, keys: 'Stick · RT/LT · B' },
-  { id: 'pad1', name: 'Gamepad 2', scheme: 'none', pad: 1, keys: 'Stick · RT/LT · B' },
   { id: 'touch', name: 'Touch', scheme: 'none', pad: -1, keys: 'On-screen buttons', touchOnly: true },
 ];
-export function getControl(id) { return CONTROLS.find(c => c.id === id) || CONTROLS[0]; }
-export function padConnected(i) {
-  try { const pads = navigator.getGamepads ? navigator.getGamepads() : []; return !!(pads && pads[i]); } catch (e) { return false; }
+
+/** Tidy a gamepad id like "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)". */
+function padLabel(gp) {
+  let name = (gp.id || 'Gamepad').replace(/\(.*?\)/g, '').replace(/vendor:.*$/i, '').replace(/\s+/g, ' ').trim();
+  if (!name || /^[0-9a-f-]+$/i.test(name)) name = 'Gamepad';
+  if (name.length > 28) name = name.slice(0, 26) + '…';
+  return name;
 }
+
+/** Currently connected gamepads: [{ index, name }]. */
+export function connectedPads() {
+  const out = [];
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const gp of pads || []) if (gp && gp.connected !== false) out.push({ index: gp.index, name: padLabel(gp) });
+  } catch (e) { /* no gamepad API */ }
+  return out;
+}
+
+/** All selectable controls right now (keyboard, touch, one entry per connected gamepad). */
+export function listControls() {
+  const pads = connectedPads().map(p => ({ id: `pad${p.index}`, name: `🎮 ${p.name}`, sub: `#${p.index + 1}`, scheme: 'none', pad: p.index, keys: 'Stick · RT/LT · B' }));
+  return [...BASE_CONTROLS.slice(0, 2), ...pads, BASE_CONTROLS[2]];
+}
+
+export function getControl(id) {
+  const m = /^pad(\d+)$/.exec(id || '');
+  if (m) return { id, name: `Gamepad ${+m[1] + 1}`, scheme: 'none', pad: +m[1], keys: 'Stick · RT/LT · B' };
+  return BASE_CONTROLS.find(c => c.id === id) || BASE_CONTROLS[0];
+}
+export function padConnected(i) { return connectedPads().some(p => p.index === i); }
 
 export class Input {
   constructor() {
@@ -31,6 +56,15 @@ export class Input {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     this.padPressed = new Map();
+    const announce = () => window.dispatchEvent(new CustomEvent('controls-changed', { detail: connectedPads() }));
+    window.addEventListener('gamepadconnected', announce);
+    window.addEventListener('gamepaddisconnected', announce);
+    // Some browsers only surface a pad after its first button press; poll lightly as a fallback.
+    this._padSig = '';
+    setInterval(() => {
+      const sig = connectedPads().map(p => p.index + ':' + p.name).join('|');
+      if (sig !== this._padSig) { this._padSig = sig; announce(); }
+    }, 1500);
     this.touch = { throttle: 0, brake: 0, steer: 0, handbrake: false, reset: false, pause: false };
     this.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     this._buildTouch();
