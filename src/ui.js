@@ -1,6 +1,6 @@
 import { TRACKS, getTrack } from './tracks.js';
 import { CARS, SERIES, UPGRADES, PLAYER_COLORS, getCar, getSeries, upgradeCost, effectiveStats } from './data.js';
-import { listControls, getControl, connectedPads } from './input.js';
+import { listControls, getControl, connectedPads, gamepadDiagnostics } from './input.js';
 import { seriesState, isSeriesUnlocked, standings, canBuyUpgrade } from './career.js';
 import { fmtTime } from './race.js';
 
@@ -304,12 +304,15 @@ export class UI {
               ${keyRow('Pause', ['Esc', 'Pad: Start'])}
             </table>
             <p>Gamepad 1 drives Player 1, gamepad 2 drives Player 2. Keyboard always works too.</p>
+            <h3>Controller test</h3>
+            <div id="pad-diag" class="card" style="font-size:13px"></div>
             <h3>Save data</h3>
             <button class="small" data-reset style="border-color:var(--bad);color:var(--bad)">Reset career progress</button>
           </div>
         </div>
       </div>`);
     this.rerender = () => this.settings();
+    this._startPadDiag();
     this.on('[data-back]', 'click', () => this.mainMenu());
     this.on('[data-q]', 'click', (e, el) => { s.quality = el.dataset.q; app.save(); this.settings(); });
     this.on('[data-sound]', 'click', (e, el) => { s.sound = el.dataset.sound === '1'; app.audio.setEnabled(s.sound); app.save(); this.settings(); });
@@ -317,6 +320,32 @@ export class UI {
     this.on('[data-ctl]', 'click', (e, el) => { s[el.dataset.ctl] = el.dataset.id; if (app.setup) { app.setup.players[0].control = s.p1Control; app.setup.players[1].control = s.p2Control; } app.save(); this.settings(); });
     this.on('[data-fullscreen]', 'click', () => app.toggleFullscreen());
     this.on('[data-reset]', 'click', () => { if (confirm('Delete all career progress, cars and best laps?')) { app.resetProfile(); this.toast('Progress reset'); this.settings(); } });
+  }
+
+  /** Live gamepad readout on the settings screen; stops itself when the panel goes away. */
+  _startPadDiag() {
+    clearInterval(this._padDiagTimer);
+    const render = () => {
+      const box = document.getElementById('pad-diag');
+      if (!box) { clearInterval(this._padDiagTimer); return; }
+      const d = gamepadDiagnostics();
+      const pads = d.pads.filter(Boolean);
+      let html = `<div class="meta">Gamepad API: <b>${d.supported ? 'available' : 'NOT available'}</b> · secure context: <b>${d.secure ? 'yes' : 'no'}</b> · page focused: <b>${d.focused ? 'yes' : 'no'}</b> · slots: ${d.pads.length}</div>`;
+      if (!pads.length) {
+        html += `<div style="margin-top:8px">No controller reported by the browser.</div>
+          <div class="meta" style="margin-top:6px">Browsers hide controllers until you press a button on them while this tab is focused. Click anywhere on this page, then press A / X or a trigger. If nothing appears after that, the browser itself doesn't see the controller: check it works in another app, try a different USB port or cable, or a different browser.</div>`;
+      } else {
+        for (const p of pads) {
+          const pressed = p.buttons.map((b, i) => b ? `B${i}${b === 1 ? '' : ':' + b}` : null).filter(Boolean).join(' ') || '—';
+          html += `<div style="margin-top:8px"><b>#${p.index + 1}</b> ${p.id}<br><span class="meta">mapping: ${p.mapping || 'none'} · connected: ${p.connected}</span><br>axes: <code>${p.axes.join(' ')}</code><br>pressed: <code>${pressed}</code></div>`;
+        }
+        html += `<div class="meta" style="margin-top:6px">Move the sticks and press buttons: the values above should change. Steering uses axis 0; gas is B7 (right trigger) or B0; brake is B6 or B2.</div>`;
+      }
+      if (d.error) html += `<div class="meta">error: ${d.error}</div>`;
+      box.innerHTML = html;
+    };
+    render();
+    this._padDiagTimer = setInterval(render, 200);
   }
 
   // ------------------------------------------------------------ Pause
