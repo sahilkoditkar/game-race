@@ -20,12 +20,12 @@ export function driveAI(car, ctx, dt) {
   }
   if (car.stuckTimer > 1.6) { car.reverseTimer = 1.1; car.stuckTimer = 0; }
 
-  const hw = track.halfWidth;
   const speed = car.speed;
   const lookM = clamp(7 + speed * 0.42, 9, 42);
   const k = Math.round(lookM / track.spacing);
   const idx = car.trackIdx;
   const ahead = track.sample(idx + k);
+  const hw = ahead.hw;
   const farCurv = track.sample(idx + k * 2).curv;
 
   // Racing line: hug the inside of upcoming corners, plus a personal lane bias.
@@ -65,11 +65,17 @@ export function driveAI(car, ctx, dt) {
   const latAcc = car.stats.grip * 2.6 * (0.6 + 0.3 * car.aiSkill);
   let cornerSpeed = Math.sqrt(latAcc / curv);
   let target = Math.min(car.stats.maxSpeed * (0.82 + 0.2 * car.aiSkill), cornerSpeed);
+  // Dynamic mode: a per-car pace multiplier calibrated against the player's lap times
+  if (car.paceScale !== undefined) target *= car.paceScale;
 
   // Rubber banding relative to best human (keeps races close but never blatant)
   if (ctx.bestPlayerProgress !== null && ctx.bestPlayerProgress !== undefined) {
     const gap = car.progress - ctx.bestPlayerProgress; // samples
-    if (gap > 120) target *= 0.94;
+    if (ctx.dynamic) {
+      // Dynamic: lean harder on the band so the pack stays within sight either way
+      const g = Math.max(-1, Math.min(1, gap / 160));
+      target *= 1 - g * 0.14;
+    } else if (gap > 120) target *= 0.94;
     else if (gap < -140) target *= 1.06;
   }
 

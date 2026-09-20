@@ -157,9 +157,17 @@ export class Race {
   _setupCars() {
     const cfg = this.config;
     const grid = [];
+    this.dynamic = !!cfg.dynamic;
+    this.refLap = cfg.referenceLap || null; // player's lap time the dynamic AI aims for
     cfg.ai.forEach((a, i) => {
       const car = new Car({ name: a.name, color: a.color, stats: a.stats, shape: a.shape, isPlayer: false, aiSkill: a.skill });
       car.laneBase = ((i % 3) - 1) * this.track.halfWidth * 0.35;
+      if (this.dynamic) {
+        // With no reference lap yet, start a touch conservative so the field doesn't vanish before the first calibration.
+        car.paceScale = this.refLap ? 1.0 : 0.93;
+        // spread the field around the player's pace: a couple slightly quicker, most a touch slower
+        car.paceOffset = 0.975 + (i / Math.max(1, cfg.ai.length - 1)) * 0.07;
+      }
       grid.push(car);
     });
     cfg.players.forEach((p, i) => {
@@ -289,7 +297,7 @@ export class Race {
     });
     let bestPlayerProgress = null;
     for (const p of this.players) if (bestPlayerProgress === null || p.progress > bestPlayerProgress) bestPlayerProgress = p.progress;
-    const ctx = { track: this.track, cars: this.cars, live, bestPlayerProgress, time: this.time };
+    const ctx = { track: this.track, cars: this.cars, live, bestPlayerProgress, time: this.time, dynamic: this.dynamic };
     for (const car of this.cars) if (!car.isPlayer || car.autopilot) driveAI(car, ctx, dt);
 
     // Physics (sub-step for stability at high speed)
@@ -384,9 +392,11 @@ export class Race {
         car.lapTimes.push(t);
         const wasBest = t < car.bestLap;
         if (wasBest) car.bestLap = t;
+        if (this.dynamic) this._dynamicLap(car, t);
         if (car.isPlayer) {
           this.audio.lap();
           let sub = wasBest ? 'BEST LAP' : '';
+          if (this.dynamic && car.playerIndex === 0) sub = wasBest ? 'BEST LAP · AI RECALIBRATED' : 'AI RECALIBRATED';
           if (this.ghost && car.playerIndex === 0) {
             const ref = this.ghostData ? this.ghostData.lapTime : null;
             if (ref) { const d = t - ref; sub = `${d <= 0 ? '' : '+'}${d.toFixed(3)} vs ghost`; }
@@ -422,6 +432,24 @@ export class Race {
     });
     sorted.forEach((c, i) => c.rank = i + 1);
     this.ranking = sorted;
+  }
+
+  /** Dynamic AI: learn the player's pace and recalibrate each AI's pace scale per lap. */
+  _dynamicLap(car, t) {
+    if (car.isPlayer) {
+      // Aim for the player's typical pace (recent laps), not their single best.
+      // The opening lap includes the standing start, so discount it a little.
+      const eff = car.lap === 1 ? t * 0.98 : t;
+      this.playerLapHistory = (this.playerLapHistory || []).concat(eff).slice(-3);
+      const recent = this.playerLapHistory.reduce((a, b) => a + b, 0) / this.playerLapHistory.length;
+      this.refLap = this.refLap ? recent * 0.7 + this.refLap * 0.3 : recent;
+      return;
+    }
+    if (!this.refLap || car.paceScale === undefined) return;
+    const want = this.refLap * car.paceOffset;
+    // Lapped slower than wanted (t > want) -> more pace; quicker -> less. Lightly damped so it settles in a lap or two.
+    const correction = Math.pow(t / want, 0.9);
+    car.paceScale = Math.max(0.6, Math.min(1.3, car.paceScale * correction));
   }
 
   /** Best recorded lap of this session (time trial), or null. */

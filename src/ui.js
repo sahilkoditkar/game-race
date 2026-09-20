@@ -98,8 +98,8 @@ export class UI {
             ${mode !== 'timetrial' ? `
             <div class="field"><label>AI opponents: <b id="aiv">${st.aiCount}</b></label><input type="range" min="0" max="11" value="${st.aiCount}" data-field="aiCount"></div>
             <div class="field"><label>AI difficulty</label><div class="chips">
-              ${['Easy', 'Medium', 'Hard', 'Insane'].map((d, i) => `<div class="chip ${st.difficulty === i ? 'active' : ''}" data-diff="${i}">${d}</div>`).join('')}
-            </div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div><div class="meta" style="margin-top:6px">Your best lap is replayed as a ghost car. Beat it to record a new one.</div></div>`}
+              ${['Easy', 'Medium', 'Hard', 'Dynamic'].map((d, i) => `<div class="chip ${st.difficulty === i ? 'active' : ''}" data-diff="${i}">${d}</div>`).join('')}
+            </div><div class="meta" style="margin-top:6px">${['Club-level opponents.', 'Quick, consistent drivers.', 'Elite pace, no mistakes.', 'The AI learns your lap times and races at your pace: some just quicker, most just slower.'][st.difficulty]}</div></div>` : `<div class="field"><label>Best lap here</label><div>${this._bestLapLine(tr.id)}</div><div class="meta" style="margin-top:6px">Your best lap is replayed as a ghost car. Beat it to record a new one.</div></div>`}
           </div>
           <div class="grid-2">
             ${st.players.slice(0, nPlayers).map((pl, i) => `
@@ -362,7 +362,7 @@ export class UI {
     this.show(`
       <div class="panel">
         <h1>${heading}</h1>
-        <div class="tagline">${ctx.trackName} · ${ctx.laps} lap${ctx.laps === 1 ? '' : 's'}</div>
+        <div class="tagline">${ctx.trackName} · ${ctx.laps} lap${ctx.laps === 1 ? '' : 's'}${ctx.dynamic ? ' · dynamic AI' : ''}</div>
         ${ctx.mode !== 'timetrial' ? `<div class="podium">${top3.map(r => `<div class="step p${r.rank}"><div class="n">${r.rank}</div><div class="who"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${hex(r.color)};margin-right:5px"></span>${r.name}</div></div>`).join('')}</div>` : ''}
         <table>
           <tr><th>#</th><th>Driver</th><th class="num">Time</th><th class="num">Best lap</th></tr>
