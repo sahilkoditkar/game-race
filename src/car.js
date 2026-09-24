@@ -295,7 +295,13 @@ export function buildCarMesh(shape, color) {
     const tyre = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 24), mat(0x101114, { roughness: 0.9, metalness: 0.0 }));
     tyre.rotation.z = Math.PI / 2; tyre.castShadow = true;
     spin.add(tyre);
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.62, w + 0.02, 16), chrome);
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.68, r * 0.68, w + 0.025, 20), mat(0x9da3ab, { roughness: 0.28, metalness: 0.9 }));
+    rotor.rotation.z = Math.PI / 2;
+    spin.add(rotor);
+    const caliper = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, r * 0.26, r * 0.14), mat(shape === 'rally' ? 0xf0b429 : 0xd72d2d, { roughness: 0.3, metalness: 0.45 }));
+    caliper.position.set(0, r * 0.38, 0);
+    spin.add(caliper);
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.54, r * 0.54, w + 0.045, 16), chrome);
     rim.rotation.z = Math.PI / 2;
     spin.add(rim);
     for (let i = 0; i < 5; i++) {
@@ -325,6 +331,18 @@ export function buildCarMesh(shape, color) {
     for (const sx of [-1, 1]) { addBox(0.22, 0.1, 0.14, sx * w, y, z, paint); addBox(0.05, 0.06, 0.16, sx * (w - 0.12), y - 0.02, z, dark); }
   };
   const addExhaust = (z, y, xs) => { for (const x of xs) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.25, 10), chrome); p.rotation.x = Math.PI / 2; p.position.set(x, B(y), z); body.add(p); } };
+  const addSideNumberBoards = () => {
+    for (const sx of [-1, 1]) {
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.42), new THREE.MeshStandardMaterial({ color: 0xf4f0e6, roughness: 0.55, metalness: 0 }));
+      board.position.set(sx * 1.015, B(0.76), -0.18);
+      board.rotation.y = sx * Math.PI / 2;
+      body.add(board);
+      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.16), carbon);
+      mark.position.set(sx * 1.03, B(0.76), -0.18);
+      body.add(mark);
+    }
+  };
+  const addCenterStripe = (z, y, length, width = 0.18) => addBox(width, 0.025, length, 0, y, z, new THREE.MeshStandardMaterial({ color: 0xf4f0e6, roughness: 0.28, metalness: 0.15 }));
 
   if (shape === 'formula') {
     // Slim monocoque with raised nose, sidepods, wings and halo.
@@ -334,8 +352,11 @@ export function buildCarMesh(shape, color) {
     addProfile([[-1.6, 0.1], [0.6, 0.1], [0.9, 0.3], [0.4, 0.72], [-1.5, 0.72], [-1.7, 0.45]], 0.85, 0.82, paint, 0.06);
     addBox(2.6, 0.06, 4.4, 0, 0.07, -0.3, carbon);                                  // floor plank
     addBox(3.0, 0.05, 0.55, 0, 0.14, 2.5, carbon);                                  // front wing
+    addBox(2.75, 0.04, 0.48, 0, 0.25, 2.35, carbon);                                 // upper front flap
+    addBox(2.45, 0.035, 0.4, 0, 0.34, 2.22, carbon);                                 // third wing element
     addBox(0.06, 0.24, 0.55, -1.5, 0.26, 2.5, paint); addBox(0.06, 0.24, 0.55, 1.5, 0.26, 2.5, paint);
     addBox(2.3, 0.05, 0.5, 0, 1.05, -2.05, carbon);                                  // rear wing
+    addBox(2.15, 0.04, 0.38, 0, 1.18, -2.05, carbon);                                // DRS flap
     addBox(0.05, 0.55, 0.5, -1.15, 0.8, -2.05, paint); addBox(0.05, 0.55, 0.5, 1.15, 0.8, -2.05, paint);
     addBox(0.25, 0.4, 0.9, 0, 1.05, -0.7, paint);                                    // airbox / engine cover
     const halo = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 6, 18, Math.PI), carbon);
@@ -355,6 +376,7 @@ export function buildCarMesh(shape, color) {
     addBox(2.05, 0.16, 0.35, 0, 0.36, -2.3, chrome);
     addBox(1.2, 0.18, 0.02, 0, 0.72, 2.36, dark);                                      // grille
     addMirrors(0.7, 1.08, 1.03);
+    addCenterStripe(0.7, 1.03, 2.7, 0.16);
     addExhaust(-2.4, 0.38, [-0.6, 0.6]);
     addWheel(-0.9, 1.5, 0.36, 0.3, true); addWheel(0.9, 1.5, 0.36, 0.3, true);
     addWheel(-0.92, -1.5, 0.38, 0.42); addWheel(0.92, -1.5, 0.38, 0.42);
@@ -373,6 +395,8 @@ export function buildCarMesh(shape, color) {
     addBox(1.9, 0.16, 0.4, 0, 0.42, -1.95, dark);
     for (const sx of [-0.55, -0.2, 0.2, 0.55]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xfff2b0, emissiveIntensity: 2 })); l.rotation.x = Math.PI / 2; l.position.set(sx, B(0.95), 2.0); body.add(l); } // rally lamps
     addMirrors(0.75, 1.12, 0.98);
+    addSideNumberBoards();
+    addCenterStripe(0.25, 1.08, 2.8, 0.15);
     addExhaust(-2.0, 0.45, [0.45]);
     addWheel(-0.9, 1.25, 0.4, 0.34, true); addWheel(0.9, 1.25, 0.4, 0.34, true);
     addWheel(-0.9, -1.25, 0.4, 0.34); addWheel(0.9, -1.25, 0.4, 0.34);
@@ -384,10 +408,12 @@ export function buildCarMesh(shape, color) {
     addProfile([[-1.3, 0.85], [-0.9, 1.15], [0.2, 1.18], [1.0, 0.85]], 1.4, 0, glass, 0.05);
     addBox(0.9, 0.05, 0.7, 0, 1.19, -0.35, paint);                                     // roof
     addBox(1.4, 0.2, 1.1, 0, 0.9, -1.4, carbon);                                       // engine cover
+    addBox(0.34, 0.16, 0.65, 0, 1.18, -0.9, carbon);                                  // roof scoop
     for (const sx of [-1, 1]) addBox(0.35, 0.3, 0.9, sx * 0.85, 0.85, -0.2, dark);      // side intakes
     addBox(2.05, 0.08, 0.5, 0, 0.24, 2.3, carbon);                                     // splitter
     addBox(2.0, 0.12, 0.4, 0, 0.3, -2.25, carbon);                                     // diffuser
     if (shape === 'hyper') {
+      addBox(0.42, 0.2, 1.1, 0, 1.05, 0.15, carbon);                                  // hypercar canopy spine
       addBox(1.9, 0.05, 0.5, 0, 1.3, -2.0, carbon);
       addBox(0.06, 0.4, 0.5, -0.5, 1.1, -2.0, paint); addBox(0.06, 0.4, 0.5, 0.5, 1.1, -2.0, paint);
       addBox(0.25, 0.4, 1.3, 0, 1.0, -1.0, paint);                                    // shark fin
@@ -395,6 +421,8 @@ export function buildCarMesh(shape, color) {
       addBox(1.7, 0.05, 0.35, 0, 0.95, -2.15, carbon);
     }
     addMirrors(0.6, 0.95, 1.05);
+    addSideNumberBoards();
+    addCenterStripe(0.8, 0.88, 2.25, 0.16);
     addExhaust(-2.3, 0.45, [-0.35, 0.35]);
     addWheel(-0.92, 1.45, 0.36, 0.32, true); addWheel(0.92, 1.45, 0.36, 0.32, true);
     addWheel(-0.94, -1.45, 0.38, 0.4); addWheel(0.94, -1.45, 0.38, 0.4);
@@ -409,6 +437,7 @@ export function buildCarMesh(shape, color) {
     for (const sx of [-1, 1]) { const hl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d0, emissiveIntensity: 1.5 })); hl.position.set(sx * 0.65, B(0.85), 1.9); body.add(hl); }
     addBox(1.75, 0.12, 0.3, 0, 0.42, 1.95, chrome); addBox(1.75, 0.12, 0.3, 0, 0.42, -1.9, chrome);
     for (const sx of [-1, 1]) addBox(0.3, 0.06, 1.1, sx * 0.95, 0.88, 1.15, paint);    // front fenders
+    addCenterStripe(0.65, 1.08, 2.25, 0.12);
     addExhaust(-1.95, 0.4, [0.5]);
     addWheel(-0.8, 1.2, 0.38, 0.22, true); addWheel(0.8, 1.2, 0.38, 0.22, true);
     addWheel(-0.8, -1.15, 0.38, 0.22); addWheel(0.8, -1.15, 0.38, 0.22);
@@ -424,6 +453,8 @@ export function buildCarMesh(shape, color) {
     addBox(0.5, 0.35, 1.3, -0.75, 0.9, 1.4, paint); addBox(0.5, 0.35, 1.3, 0.75, 0.9, 1.4, paint); // front fenders
     addBox(0.55, 0.4, 1.5, -0.75, 0.9, -1.3, paint); addBox(0.55, 0.4, 1.5, 0.75, 0.9, -1.3, paint); // rear fenders
     addMirrors(0.6, 0.95, 1.05);
+    addSideNumberBoards();
+    addCenterStripe(0.5, 0.82, 2.2, 0.12);
     addExhaust(-2.4, 0.42, [-0.5, 0.5]);
     addWheel(-0.95, 1.5, 0.36, 0.34, true); addWheel(0.95, 1.5, 0.36, 0.34, true);
     addWheel(-0.95, -1.5, 0.38, 0.4); addWheel(0.95, -1.5, 0.38, 0.4);
@@ -440,6 +471,8 @@ export function buildCarMesh(shape, color) {
     addBox(1.9, 0.12, 0.35, 0, 0.32, -2.2, dark);
     addBox(0.9, 0.08, 0.02, 0, 0.62, 2.26, dark);                                       // grille
     addMirrors(0.7, 1.02, 1.0);
+    addSideNumberBoards();
+    addCenterStripe(0.65, 0.92, 2.5, 0.13);
     addExhaust(-2.3, 0.4, [-0.55, 0.55]);
     addWheel(-0.9, 1.4, WHEEL_R, 0.32, true); addWheel(0.9, 1.4, WHEEL_R, 0.32, true);
     addWheel(-0.9, -1.45, WHEEL_R, 0.36); addWheel(0.9, -1.45, WHEEL_R, 0.36);
@@ -453,7 +486,10 @@ export function buildCarMesh(shape, color) {
     addBox(1.85, 0.14, 0.4, 0, 0.32, 1.95, dark);
     addBox(1.85, 0.14, 0.4, 0, 0.32, -1.95, dark);
     addBox(0.8, 0.08, 0.02, 0, 0.6, 1.96, dark);
+    addBox(1.45, 0.05, 0.35, 0, 1.7, -1.76, carbon);                                      // touring-car wing
+    addBox(0.05, 0.32, 0.3, -0.58, 1.54, -1.76, paint); addBox(0.05, 0.32, 0.3, 0.58, 1.54, -1.76, paint);
     addMirrors(0.75, 1.05, 0.95);
+    addSideNumberBoards();
     addExhaust(-2.0, 0.38, [0.5]);
     addWheel(-0.85, 1.25, WHEEL_R, 0.3, true); addWheel(0.85, 1.25, WHEEL_R, 0.3, true);
     addWheel(-0.85, -1.25, WHEEL_R, 0.3); addWheel(0.85, -1.25, WHEEL_R, 0.3);

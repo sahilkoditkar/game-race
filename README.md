@@ -14,8 +14,9 @@ hosted directly on GitHub Pages (or any static host).
 - Four point-to-point stages (6–10 km): a 390 m mountain hillclimb, a coastal highway run, a
   desert dune crossing and a narrow forest rally stage. Single run from start to finish, with
   elevation, varying width, a finish gantry and barriers at both ends.
-- Nine cars, from a vintage roadster and a muscle car to a rally hatch, supercar, hypercar,
-  endurance prototype and open-wheel single seater.
+- Nine detailed motorsport vehicles: a Lotus Elan, Civic Type R touring car, Challenger SRT,
+  Porsche 911 GT3 R, Subaru Impreza WRC, Lamborghini Huracán STO, Porsche 963, Bugatti Bolide,
+  and a ground-effect Formula 1 car.
 - Arcade driving model with a grip-limited bicycle steering model, drift handbrake, off-road
   grip loss (the rally car barely cares), slope gravity, barrier and car-to-car collisions.
 - **Split-screen multiplayer**: two players on one keyboard (WASD vs arrow keys) or two gamepads.
@@ -86,7 +87,7 @@ style.css             menus and HUD styling
 vendor/three.module.js vendored Three.js (r170) so no CDN is needed
 src/main.js           app state machine, render loop, race lifecycle
 src/race.js           race manager: physics loop, collisions, laps, ranking, split-screen rendering
-src/car.js            car physics and procedural car meshes (4 body styles)
+src/car.js            car physics and procedural motorsport car meshes (9 body styles)
 src/ai.js             AI driver behaviour
 src/track.js          spline sampling, road/curb/barrier geometry, track queries
 src/tracks.js         track definitions (control points, incl. real-circuit-inspired layouts) and themes

@@ -248,7 +248,8 @@ export class UI {
             const owned = p.cars.includes(c.id);
             return `<div class="card ${c.id === p.selected ? 'selected' : ''}">
               <div class="row between"><h4>${c.name}</h4>${owned ? (c.id === p.selected ? '<span class="badge gold">Selected</span>' : '<span class="badge done">Owned</span>') : `<span class="badge">${money(c.price)}</span>`}</div>
-              <div class="meta" style="margin-bottom:8px">${c.desc}</div>
+              <div class="meta"><span class="car-discipline">${c.discipline}</span></div>
+              <div class="meta" style="margin:8px 0">${c.desc}</div>
               ${this._statBars(effectiveStats(c, p.upgrades[c.id] || {}))}
               <div class="row end" style="margin-top:8px">
                 ${owned && c.id !== p.selected ? `<button class="small" data-select="${c.id}">Select</button>` : ''}
