@@ -14,8 +14,13 @@ hosted directly on GitHub Pages (or any static host).
 - Four point-to-point stages (6–10 km): a 390 m mountain hillclimb, a coastal highway run, a
   desert dune crossing and a narrow forest rally stage. Single run from start to finish, with
   elevation, varying width, a finish gantry and barriers at both ends.
-- Nine cars, from a vintage roadster and a muscle car to a rally hatch, supercar, hypercar,
-  endurance prototype and open-wheel single seater.
+- Ten cars, each modelled on a real car's dimensions and signature details: a Jaguar E-Type-style
+  roadster, a Golf GTI-style hot hatch, a '67 Mustang-style fastback, a 911 GT3 RS-style track car,
+  a GR Yaris Rally1-style gravel car, an Audi quattro S1-style Group B car, a Huracán-style
+  supercar, a Le Mans Hypercar prototype, a Chiron-style hypercar and a 2022-rules F1 car. Bodies
+  are smooth procedural lofts with real wheel-arch openings, surface-hugging lights, glass and
+  liveries, and wheels with brake discs and calipers. Race cars carry per-car numbers and livery
+  colours. Open `showroom.html` to inspect every car up close.
 - Arcade driving model with a grip-limited bicycle steering model, drift handbrake, off-road
   grip loss (the rally car barely cares), slope gravity, barrier and car-to-car collisions.
 - **Split-screen multiplayer**: two players on one keyboard (WASD vs arrow keys) or two gamepads.
@@ -86,7 +91,10 @@ style.css             menus and HUD styling
 vendor/three.module.js vendored Three.js (r170) so no CDN is needed
 src/main.js           app state machine, render loop, race lifecycle
 src/race.js           race manager: physics loop, collisions, laps, ranking, split-screen rendering
-src/car.js            car physics and procedural car meshes (4 body styles)
+src/car.js            car physics
+src/carmodels.js      the ten car models (proportions, lights, aero, liveries)
+src/carkit.js         procedural body toolkit: lofted shells, arch cut-outs, surface panels, wheels
+showroom.html         turntable viewer for every car (drag to orbit, pick colours)
 src/ai.js             AI driver behaviour
 src/track.js          spline sampling, road/curb/barrier geometry, track queries
 src/tracks.js         track definitions (control points, incl. real-circuit-inspired layouts) and themes

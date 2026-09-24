@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildCarMesh } from './carmodels.js';
 
 const WHEEL_R = 0.36;
 const WHEELBASE = 2.6;
@@ -10,9 +11,10 @@ export class Car {
    * @param {string} o.name
    * @param {number} o.color
    * @param {object} o.stats   effective stats {maxSpeed, accel, grip, turn, brake}
-   * @param {string} o.shape   'hatch' | 'gt' | 'proto' | 'formula'
+   * @param {string} o.shape   model id from carmodels.js (e.g. 'hatch', 'super', 'formula')
    * @param {boolean} o.isPlayer
    * @param {number} o.playerIndex
+   * @param {string} [o.quality] 'high' | 'low' mesh detail
    */
   constructor(o) {
     this.name = o.name;
@@ -56,7 +58,7 @@ export class Car {
     this.rank = 1;
 
     this.wheelSpin = 0;
-    this.mesh = buildCarMesh(this.shape, this.color);
+    this.mesh = buildCarMesh(this.shape, this.color, o.quality);
     this.wheels = this.mesh.userData.wheels;
     this.frontWheels = this.mesh.userData.frontWheels;
     this.body = this.mesh.userData.body;
@@ -242,232 +244,11 @@ export class Car {
 
 /* ----------------------------------------------------------------- Meshes */
 
-function mat(color, extra = {}) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.35, ...extra });
-}
-
-/**
- * Extrude a side profile (points as [z, y] in car space, z forward) across the car's
- * width with bevelled edges. Returns a geometry centred on x = 0.
- */
-function profileGeometry(profile, width, bevel = 0.1) {
-  const shape = new THREE.Shape();
-  profile.forEach(([z, y], i) => (i === 0 ? shape.moveTo(z, y) : shape.lineTo(z, y)));
-  shape.closePath();
-  const g = new THREE.ExtrudeGeometry(shape, {
-    depth: Math.max(0.05, width - bevel * 2), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 6,
-  });
-  // Shape lies in XY extruded along +Z. Rotate so shape-x -> car z and extrusion -> car x.
-  g.rotateY(-Math.PI / 2);
-  g.translate(width / 2 - bevel, 0, 0);
-  g.computeVertexNormals();
-  return g;
-}
-
-export function buildCarMesh(shape, color) {
-  const g = new THREE.Group();
-  const body = new THREE.Group(); // roll/pitch pivot for the painted shell only
-  body.position.y = WHEEL_R;      // pivot at axle height so the shell leans, not lifts
-  g.add(body);
-  const B = (y) => y - WHEEL_R;   // convert absolute height to body-local height
-
-  const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.22, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.0 });
-  const dark = mat(0x15161a, { roughness: 0.65, metalness: 0.2 });
-  const glass = new THREE.MeshPhysicalMaterial({ color: 0x2a4d66, roughness: 0.08, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.4 });
-  const chrome = mat(0xd4d7dd, { roughness: 0.15, metalness: 1.0 });
-  const carbon = mat(0x24262c, { roughness: 0.45, metalness: 0.6 });
-  const wheels = [], frontWheels = [], brakeLights = [];
-
-  const addMesh = (geo, m, x, y, z, parent = body) => {
-    const mesh = new THREE.Mesh(geo, m);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    parent.add(mesh);
-    return mesh;
-  };
-  const addBox = (w, h, d, x, y, z, m, parent = body) => addMesh(new THREE.BoxGeometry(w, h, d), m, x, B(y), z, parent);
-  const addProfile = (profile, width, x, m, bevel) => addMesh(profileGeometry(profile, width, bevel), m, x, B(0), 0);
-
-  const addWheel = (x, z, r = WHEEL_R, w = 0.32, front = false) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, r, z);
-    const spin = new THREE.Group();
-    const tyre = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 24), mat(0x101114, { roughness: 0.9, metalness: 0.0 }));
-    tyre.rotation.z = Math.PI / 2; tyre.castShadow = true;
-    spin.add(tyre);
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.62, r * 0.62, w + 0.02, 16), chrome);
-    rim.rotation.z = Math.PI / 2;
-    spin.add(rim);
-    for (let i = 0; i < 5; i++) {
-      const holder = new THREE.Group();
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, r * 0.5, 0.06), dark);
-      spoke.position.y = r * 0.32;
-      holder.add(spoke);
-      holder.rotation.x = (i / 5) * Math.PI * 2;
-      spin.add(holder);
-    }
-    pivot.add(spin);
-    g.add(pivot); // wheels are attached to the chassis, not the leaning shell
-    wheels.push(spin);
-    if (front) frontWheels.push(pivot);
-    return pivot;
-  };
-
-  const addLights = (z, y, w, emissiveColor, isBrake, size = [0.34, 0.14, 0.08]) => {
-    for (const sx of [-1, 1]) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshStandardMaterial({ color: emissiveColor, emissive: emissiveColor, emissiveIntensity: isBrake ? 0.8 : 1.6 }));
-      m.position.set(sx * w, B(y), z);
-      body.add(m);
-      if (isBrake) brakeLights.push(m);
-    }
-  };
-  const addMirrors = (z, y, w) => {
-    for (const sx of [-1, 1]) { addBox(0.22, 0.1, 0.14, sx * w, y, z, paint); addBox(0.05, 0.06, 0.16, sx * (w - 0.12), y - 0.02, z, dark); }
-  };
-  const addExhaust = (z, y, xs) => { for (const x of xs) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.25, 10), chrome); p.rotation.x = Math.PI / 2; p.position.set(x, B(y), z); body.add(p); } };
-
-  if (shape === 'formula') {
-    // Slim monocoque with raised nose, sidepods, wings and halo.
-    addProfile([[-2.1, 0.12], [-1.9, 0.1], [-0.6, 0.1], [0.3, 0.12], [1.3, 0.2], [2.3, 0.38], [2.4, 0.58], [1.4, 0.7], [0.4, 0.78], [-0.2, 0.95], [-0.9, 0.95], [-1.9, 0.62], [-2.1, 0.4]], 0.85, 0, paint, 0.06);
-    addProfile([[-1.0, 0.75], [0.2, 0.75], [0.35, 0.95], [-0.4, 1.02], [-1.0, 0.9]], 0.6, 0, glass, 0.04); // cockpit
-    addProfile([[-1.6, 0.1], [0.6, 0.1], [0.9, 0.3], [0.4, 0.72], [-1.5, 0.72], [-1.7, 0.45]], 0.85, -0.82, paint, 0.06); // sidepods
-    addProfile([[-1.6, 0.1], [0.6, 0.1], [0.9, 0.3], [0.4, 0.72], [-1.5, 0.72], [-1.7, 0.45]], 0.85, 0.82, paint, 0.06);
-    addBox(2.6, 0.06, 4.4, 0, 0.07, -0.3, carbon);                                  // floor plank
-    addBox(3.0, 0.05, 0.55, 0, 0.14, 2.5, carbon);                                  // front wing
-    addBox(0.06, 0.24, 0.55, -1.5, 0.26, 2.5, paint); addBox(0.06, 0.24, 0.55, 1.5, 0.26, 2.5, paint);
-    addBox(2.3, 0.05, 0.5, 0, 1.05, -2.05, carbon);                                  // rear wing
-    addBox(0.05, 0.55, 0.5, -1.15, 0.8, -2.05, paint); addBox(0.05, 0.55, 0.5, 1.15, 0.8, -2.05, paint);
-    addBox(0.25, 0.4, 0.9, 0, 1.05, -0.7, paint);                                    // airbox / engine cover
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 6, 18, Math.PI), carbon);
-    halo.position.set(0, B(0.95), 0.6); halo.rotation.x = Math.PI / 2; body.add(halo);
-    addBox(0.06, 0.4, 0.06, 0, 0.9, 0.95, carbon);
-    addWheel(-0.95, 1.55, 0.36, 0.34, true); addWheel(0.95, 1.55, 0.36, 0.34, true);
-    addWheel(-0.98, -1.35, 0.40, 0.44); addWheel(0.98, -1.35, 0.40, 0.44);
-    addLights(-2.3, 0.88, 0.0, 0xff2020, true, [0.25, 0.25, 0.06]);
-  } else if (shape === 'muscle') {
-    // Long-nose muscle car with a hood scoop and fat rear tyres.
-    addProfile([[-2.3, 0.3], [-2.35, 0.7], [-2.2, 0.98], [-1.2, 1.0], [-0.2, 1.0], [1.2, 0.95], [2.25, 0.8], [2.35, 0.5], [2.25, 0.3]], 1.95, 0, paint, 0.1);
-    addProfile([[-1.4, 0.98], [-1.0, 1.4], [0.1, 1.42], [0.75, 1.0]], 1.6, 0, glass, 0.05);
-    addBox(1.3, 0.05, 0.95, 0, 1.43, -0.5, paint);                                    // roof
-    addBox(0.7, 0.14, 0.9, 0, 1.05, 1.4, paint);                                      // hood scoop
-    addBox(2.0, 0.08, 0.5, 0, 1.05, -2.2, dark);                                       // ducktail spoiler
-    addBox(2.05, 0.16, 0.4, 0, 0.36, 2.3, chrome);                                     // chrome bumper
-    addBox(2.05, 0.16, 0.35, 0, 0.36, -2.3, chrome);
-    addBox(1.2, 0.18, 0.02, 0, 0.72, 2.36, dark);                                      // grille
-    addMirrors(0.7, 1.08, 1.03);
-    addExhaust(-2.4, 0.38, [-0.6, 0.6]);
-    addWheel(-0.9, 1.5, 0.36, 0.3, true); addWheel(0.9, 1.5, 0.36, 0.3, true);
-    addWheel(-0.92, -1.5, 0.38, 0.42); addWheel(0.92, -1.5, 0.38, 0.42);
-    addLights(2.34, 0.72, 0.7, 0xffffff, false, [0.28, 0.28, 0.06]);
-    addLights(-2.38, 0.74, 0.62, 0xff2020, true, [0.5, 0.12, 0.06]);
-  } else if (shape === 'rally') {
-    // Lifted rally hatch with flared arches, roof vent and a big wing.
-    addProfile([[-1.9, 0.38], [-1.95, 0.72], [-1.85, 1.0], [-1.0, 1.05], [0.4, 1.05], [1.5, 0.95], [1.95, 0.72], [1.95, 0.5], [1.85, 0.38]], 1.85, 0, paint, 0.1);
-    addProfile([[-1.75, 1.0], [-1.45, 1.5], [0.1, 1.53], [0.9, 1.08]], 1.55, 0, glass, 0.05);
-    addBox(1.3, 0.05, 1.4, 0, 1.54, -0.65, paint);                                    // roof
-    addBox(0.5, 0.1, 0.5, 0, 1.6, 0.1, dark);                                          // roof vent
-    for (const sx of [-1, 1]) { addBox(0.22, 0.4, 1.1, sx * 0.95, 0.6, 1.25, paint); addBox(0.22, 0.4, 1.1, sx * 0.95, 0.6, -1.25, paint); } // arches
-    addBox(1.7, 0.05, 0.45, 0, 1.35, -1.95, carbon);                                   // wing
-    addBox(0.05, 0.35, 0.4, -0.7, 1.15, -1.95, paint); addBox(0.05, 0.35, 0.4, 0.7, 1.15, -1.95, paint);
-    addBox(1.9, 0.16, 0.4, 0, 0.42, 1.95, dark);
-    addBox(1.9, 0.16, 0.4, 0, 0.42, -1.95, dark);
-    for (const sx of [-0.55, -0.2, 0.2, 0.55]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xfff2b0, emissiveIntensity: 2 })); l.rotation.x = Math.PI / 2; l.position.set(sx, B(0.95), 2.0); body.add(l); } // rally lamps
-    addMirrors(0.75, 1.12, 0.98);
-    addExhaust(-2.0, 0.45, [0.45]);
-    addWheel(-0.9, 1.25, 0.4, 0.34, true); addWheel(0.9, 1.25, 0.4, 0.34, true);
-    addWheel(-0.9, -1.25, 0.4, 0.34); addWheel(0.9, -1.25, 0.4, 0.34);
-    addLights(1.96, 0.8, 0.6, 0xffffff, false, [0.3, 0.12, 0.08]);
-    addLights(-1.97, 0.85, 0.6, 0xff2020, true);
-  } else if (shape === 'super' || shape === 'hyper') {
-    // Mid-engine wedge. The hyper variant gets a swan-neck wing and diffuser.
-    addProfile([[-2.2, 0.25], [-2.25, 0.55], [-2.05, 0.78], [-1.2, 0.85], [-0.3, 0.9], [0.9, 0.82], [2.1, 0.6], [2.25, 0.42], [2.15, 0.25]], 1.98, 0, paint, 0.1);
-    addProfile([[-1.3, 0.85], [-0.9, 1.15], [0.2, 1.18], [1.0, 0.85]], 1.4, 0, glass, 0.05);
-    addBox(0.9, 0.05, 0.7, 0, 1.19, -0.35, paint);                                     // roof
-    addBox(1.4, 0.2, 1.1, 0, 0.9, -1.4, carbon);                                       // engine cover
-    for (const sx of [-1, 1]) addBox(0.35, 0.3, 0.9, sx * 0.85, 0.85, -0.2, dark);      // side intakes
-    addBox(2.05, 0.08, 0.5, 0, 0.24, 2.3, carbon);                                     // splitter
-    addBox(2.0, 0.12, 0.4, 0, 0.3, -2.25, carbon);                                     // diffuser
-    if (shape === 'hyper') {
-      addBox(1.9, 0.05, 0.5, 0, 1.3, -2.0, carbon);
-      addBox(0.06, 0.4, 0.5, -0.5, 1.1, -2.0, paint); addBox(0.06, 0.4, 0.5, 0.5, 1.1, -2.0, paint);
-      addBox(0.25, 0.4, 1.3, 0, 1.0, -1.0, paint);                                    // shark fin
-    } else {
-      addBox(1.7, 0.05, 0.35, 0, 0.95, -2.15, carbon);
-    }
-    addMirrors(0.6, 0.95, 1.05);
-    addExhaust(-2.3, 0.45, [-0.35, 0.35]);
-    addWheel(-0.92, 1.45, 0.36, 0.32, true); addWheel(0.92, 1.45, 0.36, 0.32, true);
-    addWheel(-0.94, -1.45, 0.38, 0.4); addWheel(0.94, -1.45, 0.38, 0.4);
-    addLights(2.24, 0.6, 0.7, 0xffffff, false, [0.4, 0.08, 0.08]);
-    addLights(-2.28, 0.62, 0.7, 0xff2020, true, [0.5, 0.08, 0.06]);
-  } else if (shape === 'classic') {
-    // Vintage roadster: rounded, open top, upright chrome grille.
-    addProfile([[-1.8, 0.35], [-1.9, 0.6], [-1.75, 0.95], [-1.0, 1.05], [-0.4, 1.05], [0.4, 1.0], [1.5, 0.98], [1.85, 0.8], [1.9, 0.55], [1.75, 0.35]], 1.65, 0, paint, 0.16);
-    addBox(1.4, 0.35, 0.06, 0, 1.22, 0.35, glass);                                     // windscreen
-    addBox(1.3, 0.12, 0.9, 0, 1.06, -0.45, dark);                                      // cockpit opening (seats)
-    addBox(0.9, 0.5, 0.12, 0, 0.75, 1.92, chrome);                                     // grille
-    for (const sx of [-1, 1]) { const hl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d0, emissiveIntensity: 1.5 })); hl.position.set(sx * 0.65, B(0.85), 1.9); body.add(hl); }
-    addBox(1.75, 0.12, 0.3, 0, 0.42, 1.95, chrome); addBox(1.75, 0.12, 0.3, 0, 0.42, -1.9, chrome);
-    for (const sx of [-1, 1]) addBox(0.3, 0.06, 1.1, sx * 0.95, 0.88, 1.15, paint);    // front fenders
-    addExhaust(-1.95, 0.4, [0.5]);
-    addWheel(-0.8, 1.2, 0.38, 0.22, true); addWheel(0.8, 1.2, 0.38, 0.22, true);
-    addWheel(-0.8, -1.15, 0.38, 0.22); addWheel(0.8, -1.15, 0.38, 0.22);
-    addLights(-1.93, 0.72, 0.55, 0xff2020, true, [0.18, 0.18, 0.06]);
-  } else if (shape === 'proto') {
-    // Low, wide endurance prototype with canopy, fin and big wing.
-    addProfile([[-2.3, 0.25], [-2.35, 0.55], [-1.6, 0.7], [-0.6, 0.72], [0.3, 0.75], [1.3, 0.72], [2.25, 0.6], [2.35, 0.4], [2.2, 0.25]], 2.0, 0, paint, 0.1);
-    addProfile([[-1.4, 0.7], [-0.9, 0.7], [-0.7, 1.2], [0.2, 1.22], [0.9, 0.95], [1.2, 0.72]], 1.0, 0, glass, 0.06); // canopy
-    addProfile([[-2.2, 0.7], [-1.3, 0.7], [-1.1, 1.05], [-1.3, 1.25], [-2.1, 1.25], [-2.25, 0.9]], 0.08, 0, paint, 0.02); // fin
-    addBox(2.2, 0.05, 0.55, 0, 1.35, -2.25, carbon);                                  // rear wing
-    addBox(0.05, 0.6, 0.5, -0.95, 1.05, -2.25, paint); addBox(0.05, 0.6, 0.5, 0.95, 1.05, -2.25, paint);
-    addBox(2.2, 0.06, 0.5, 0, 0.22, 2.4, carbon);                                     // splitter
-    addBox(0.5, 0.35, 1.3, -0.75, 0.9, 1.4, paint); addBox(0.5, 0.35, 1.3, 0.75, 0.9, 1.4, paint); // front fenders
-    addBox(0.55, 0.4, 1.5, -0.75, 0.9, -1.3, paint); addBox(0.55, 0.4, 1.5, 0.75, 0.9, -1.3, paint); // rear fenders
-    addMirrors(0.6, 0.95, 1.05);
-    addExhaust(-2.4, 0.42, [-0.5, 0.5]);
-    addWheel(-0.95, 1.5, 0.36, 0.34, true); addWheel(0.95, 1.5, 0.36, 0.34, true);
-    addWheel(-0.95, -1.5, 0.38, 0.4); addWheel(0.95, -1.5, 0.38, 0.4);
-    addLights(2.33, 0.62, 0.72, 0xffffff, false, [0.3, 0.12, 0.08]);
-    addLights(-2.36, 0.58, 0.78, 0xff2020, true);
-  } else if (shape === 'gt') {
-    // Long-bonnet grand tourer.
-    addProfile([[-2.2, 0.28], [-2.25, 0.62], [-2.1, 0.86], [-1.5, 0.9], [-0.3, 0.92], [1.0, 0.9], [2.1, 0.74], [2.25, 0.5], [2.15, 0.28]], 1.9, 0, paint, 0.1);
-    addProfile([[-1.55, 0.88], [-1.1, 1.3], [0.1, 1.32], [0.9, 0.9]], 1.55, 0, glass, 0.05); // greenhouse
-    addBox(1.2, 0.05, 1.05, 0, 1.33, -0.55, paint);                                    // roof panel
-    addBox(1.9, 0.05, 0.4, 0, 1.08, -2.05, carbon);                                     // spoiler
-    addBox(0.05, 0.22, 0.32, -0.75, 0.96, -2.05, paint); addBox(0.05, 0.22, 0.32, 0.75, 0.96, -2.05, paint);
-    addBox(1.95, 0.14, 0.4, 0, 0.32, 2.2, dark);                                        // front bumper / splitter
-    addBox(1.9, 0.12, 0.35, 0, 0.32, -2.2, dark);
-    addBox(0.9, 0.08, 0.02, 0, 0.62, 2.26, dark);                                       // grille
-    addMirrors(0.7, 1.02, 1.0);
-    addExhaust(-2.3, 0.4, [-0.55, 0.55]);
-    addWheel(-0.9, 1.4, WHEEL_R, 0.32, true); addWheel(0.9, 1.4, WHEEL_R, 0.32, true);
-    addWheel(-0.9, -1.45, WHEEL_R, 0.36); addWheel(0.9, -1.45, WHEEL_R, 0.36);
-    addLights(2.24, 0.68, 0.65, 0xffffff, false, [0.36, 0.1, 0.08]);
-    addLights(-2.28, 0.72, 0.65, 0xff2020, true);
-  } else {
-    // Hatchback: tall cabin, short overhangs.
-    addProfile([[-1.9, 0.28], [-1.95, 0.65], [-1.85, 0.9], [-1.0, 0.95], [0.4, 0.95], [1.5, 0.85], [1.95, 0.62], [1.95, 0.4], [1.85, 0.28]], 1.8, 0, paint, 0.1);
-    addProfile([[-1.75, 0.9], [-1.45, 1.42], [0.1, 1.45], [0.9, 1.0]], 1.5, 0, glass, 0.05);   // greenhouse
-    addBox(1.25, 0.05, 1.4, 0, 1.46, -0.65, paint);                                     // roof panel
-    addBox(1.85, 0.14, 0.4, 0, 0.32, 1.95, dark);
-    addBox(1.85, 0.14, 0.4, 0, 0.32, -1.95, dark);
-    addBox(0.8, 0.08, 0.02, 0, 0.6, 1.96, dark);
-    addMirrors(0.75, 1.05, 0.95);
-    addExhaust(-2.0, 0.38, [0.5]);
-    addWheel(-0.85, 1.25, WHEEL_R, 0.3, true); addWheel(0.85, 1.25, WHEEL_R, 0.3, true);
-    addWheel(-0.85, -1.25, WHEEL_R, 0.3); addWheel(0.85, -1.25, WHEEL_R, 0.3);
-    addLights(1.96, 0.72, 0.62, 0xffffff, false, [0.3, 0.12, 0.08]);
-    addLights(-1.97, 0.78, 0.62, 0xff2020, true);
-  }
-
-  g.userData = { wheels, frontWheels, body, brakeLights };
-  return g;
-}
+export { buildCarMesh };
 
 /** Make a translucent copy of a car mesh for ghost replays. */
-export function makeGhost(shape, color) {
-  const m = buildCarMesh(shape, color);
+export function makeGhost(shape, color, quality) {
+  const m = buildCarMesh(shape, color, quality);
   m.traverse((o) => {
     if (o.isMesh) {
       const ms = Array.isArray(o.material) ? o.material : [o.material];

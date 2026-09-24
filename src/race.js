@@ -118,7 +118,7 @@ export class Race {
     this.bestRecording = null;
     if (this.config.mode !== 'timetrial') return;
     const p = this.players[0];
-    const ghostMesh = makeGhost(p.shape, 0x9ad6ff);
+    const ghostMesh = makeGhost(p.shape, 0x9ad6ff, this.quality);
     ghostMesh.visible = false;
     this.scene.add(ghostMesh);
     this.ghost = ghostMesh;
@@ -159,7 +159,7 @@ export class Race {
     const grid = [];
     this.dynamic = !!cfg.dynamic;
     cfg.ai.forEach((a, i) => {
-      const car = new Car({ name: a.name, color: a.color, stats: a.stats, shape: a.shape, isPlayer: false, aiSkill: a.skill });
+      const car = new Car({ name: a.name, color: a.color, stats: a.stats, shape: a.shape, isPlayer: false, aiSkill: a.skill, quality: this.quality });
       car.laneBase = ((i % 3) - 1) * this.track.halfWidth * 0.35;
       if (this.dynamic) {
         car.paceScale = 0.95;
@@ -169,7 +169,7 @@ export class Race {
       grid.push(car);
     });
     cfg.players.forEach((p, i) => {
-      const car = new Car({ name: p.name, color: p.color, stats: p.stats, shape: p.shape, isPlayer: true, playerIndex: i });
+      const car = new Car({ name: p.name, color: p.color, stats: p.stats, shape: p.shape, isPlayer: true, playerIndex: i, quality: this.quality });
       car.scheme = p.scheme; car.pad = p.pad ?? -1;
       this.players.push(car);
       grid.push(car);
